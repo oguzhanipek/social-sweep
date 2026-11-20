@@ -5,7 +5,7 @@ import { Activity, ArrowDownToLine, ArrowUpRight, Check, CircleHelp, FileArchive
 
 type Person = { username: string; timestamp?: number; href?: string };
 type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string };
-type Tab = 'overview' | 'pending' | 'not-following' | 'mutual' | 'followers-only';
+type Tab = 'overview' | 'pending' | 'not-following' | 'inactive' | 'mutual' | 'followers-only';
 const PROGRESS_KEY = 'social-sweep-progress-v1';
 
 function cleanUsername(value: unknown): string {
@@ -60,7 +60,9 @@ export default function App() {
 
   const followingSet = useMemo(() => new Set((data?.following || []).map(x => x.username)), [data]);
   const followerSet = useMemo(() => new Set((data?.followers || []).map(x => x.username)), [data]);
-  const notFollowing = useMemo(() => (data?.following || []).filter(x => !followerSet.has(x.username)), [data, followerSet]);
+  const inactiveSet = new Set(progress.inactive || []);
+  const inactiveAccounts = useMemo(() => (data?.following || []).filter(x => inactiveSet.has(x.username)), [data, progress.inactive]);
+  const notFollowing = useMemo(() => (data?.following || []).filter(x => !followerSet.has(x.username) && !inactiveSet.has(x.username)), [data, followerSet, progress.inactive]);
   const mutual = useMemo(() => (data?.following || []).filter(x => followerSet.has(x.username)), [data, followerSet]);
   const followersOnly = useMemo(() => (data?.followers || []).filter(x => !followingSet.has(x.username)), [data, followingSet]);
   const donePending = new Set(progress.pending || []);
@@ -95,11 +97,11 @@ export default function App() {
     } catch (e) { setNotice(e instanceof Error ? e.message : 'ZIP dosyası okunamadı.'); }
     finally { setBusy(false); if (fileRef.current) fileRef.current.value = ''; }
   }
-  function mark(kind: 'pending' | 'unfollow', username: string) {
+  function mark(kind: 'pending' | 'unfollow' | 'inactive', username: string) {
     const next = { ...progress, [kind]: [...new Set([...(progress[kind] || []), username])] };
     setProgress(next); localStorage.setItem(PROGRESS_KEY, JSON.stringify(next));
   }
-  function undo(kind: 'pending' | 'unfollow', username: string) {
+  function undo(kind: 'pending' | 'unfollow' | 'inactive', username: string) {
     const next = { ...progress, [kind]: (progress[kind] || []).filter(x => x !== username) };
     setProgress(next); localStorage.setItem(PROGRESS_KEY, JSON.stringify(next));
   }
@@ -113,9 +115,9 @@ export default function App() {
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `social-sweep-${label}.csv`; a.click(); URL.revokeObjectURL(url);
   }
 
-  const currentRows = tab === 'pending' ? (data?.pending || []) : tab === 'not-following' ? notFollowing : tab === 'mutual' ? mutual : tab === 'followers-only' ? followersOnly : [];
+  const currentRows = tab === 'pending' ? (data?.pending || []) : tab === 'not-following' ? notFollowing : tab === 'inactive' ? inactiveAccounts : tab === 'mutual' ? mutual : tab === 'followers-only' ? followersOnly : [];
   const filteredRows = currentRows.filter(x => x.username.includes(search.toLowerCase().replace(/^@/, '')));
-  const title = tab === 'pending' ? 'Bekleyen takip istekleri' : tab === 'not-following' ? 'Seni takip etmeyenler' : tab === 'mutual' ? 'Karşılıklı takip' : 'Seni takip edenler';
+  const title = tab === 'pending' ? 'Bekleyen takip istekleri' : tab === 'not-following' ? 'Seni takip etmeyenler' : tab === 'inactive' ? 'Erişilemeyen hesaplar' : tab === 'mutual' ? 'Karşılıklı takip' : 'Seni takip edenler';
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -124,6 +126,7 @@ export default function App() {
       <button className={`nav-item ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}><Activity size={18}/> Genel Bakış</button>
       <button className={`nav-item ${tab === 'pending' ? 'active' : ''}`} onClick={() => setTab('pending')}><UserPlus size={18}/> Bekleyen istekler {data && <em>{data.pending.length}</em>}</button>
       <button className={`nav-item ${tab === 'not-following' ? 'active' : ''}`} onClick={() => setTab('not-following')}><UserMinus size={18}/> Geri takip etmeyenler {data && <em>{notFollowing.length}</em>}</button>
+      <button className={`nav-item ${tab === 'inactive' ? 'active' : ''}`} onClick={() => setTab('inactive')}><CircleHelp size={18}/> Erişilemeyen hesaplar {data && <em>{inactiveAccounts.length}</em>}</button>
       <button className={`nav-item ${tab === 'mutual' ? 'active' : ''}`} onClick={() => setTab('mutual')}><Heart size={18}/> Karşılıklı takip</button>
       <button className={`nav-item ${tab === 'followers-only' ? 'active' : ''}`} onClick={() => setTab('followers-only')}><Users size={18}/> Seni takip edenler</button>
       <div className="sidebar-bottom"><div className="privacy-mini"><LockKeyhole size={16}/><span>Verilerin cihazından çıkmaz.</span></div><a href="https://github.com/oguzhanipek/social-sweep" target="_blank" rel="noreferrer">GitHub projesi <ArrowUpRight size={14}/></a></div>
@@ -141,12 +144,25 @@ export default function App() {
               <section className="panel quick-panel"><div className="panel-heading"><div><h3>Hızlı işlemler</h3><p>Analiz listelerine geç</p></div><Sparkles size={18} className="muted-icon"/></div><QuickAction icon={<UserPlus/>} title="Bekleyen istekler" detail={`${data.pending.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('pending')}/><QuickAction icon={<UserMinus/>} title="Geri takip etmeyenler" detail={`${notFollowing.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('not-following')}/><QuickAction icon={<Heart/>} title="Karşılıklı takip" detail={`${mutual.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('mutual')}/></section></div>
             <div className="privacy-banner"><ShieldCheck size={20}/><div><b>Gizlilik öncelikli tasarım</b><span>Arşivin tarayıcında okunur. Instagram şifreni istemeyiz ve hesabına senin adına giriş yapmayız.</span></div></div>
           </> : <>
-            <div className="section-heading"><div><div className="eyebrow">TAKİP YÖNETİMİ</div><h2>{title}</h2><p>{tab === 'pending' ? 'Gönderdiğin ve henüz yanıtlanmamış takip istekleri.' : tab === 'not-following' ? 'Senin takip ettiğin ancak arşivde seni takip ediyor görünmeyen hesaplar.' : tab === 'mutual' ? 'Birbirinizi takip ettiğiniz hesaplar.' : 'Seni takip eden ancak senin takip etmediğin hesaplar.'}</p></div><button className="text-btn" onClick={() => exportCsv(currentRows, tab)}><ArrowDownToLine size={15}/> CSV dışa aktar</button></div>
+<h2>{title}</h2><p>{tab === 'pending' ? 'Gönderdiğin ve henüz yanıtlanmamış takip istekleri.' : tab === 'not-following' ? 'Seni takip etmeyen ve erişilebilir olduğunu kontrol ettiğin hesaplar.' : tab === 'inactive' ? 'Profilini açtığında erişilemediğini gördüğün hesaplar. Bu hesaplar takip etmeyenler sayısından çıkarılır.' : tab === 'mutual' ? 'Birbirinizi takip ettiğiniz hesaplar.' : 'Seni takip eden ancak senin takip etmediğin hesaplar.'}</p>
             <section className="panel table-panel"><div className="table-toolbar"><div className="searchbox"><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Kullanıcı adı ara…"/></div><div className="result-count"><span className="filter-symbol">⌕</span> {filteredRows.length.toLocaleString('tr-TR')} sonuç</div></div>
               <div className="table-head"><span>HESAP</span><span>ARŞİV TARİHİ</span><span>İŞLEM</span></div>
-              <div className="table-body">{filteredRows.slice(0, 300).map(person => { const done = tab === 'pending' ? donePending.has(person.username) : doneUnfollow.has(person.username); const kind = tab === 'pending' ? 'pending' : 'unfollow'; return <div className={`table-row ${done ? 'is-done' : ''}`} key={person.username}><div className="account-cell"><div className="avatar">{person.username.slice(0,1).toUpperCase()}</div><div><b>@{person.username}</b><span>Instagram hesabı</span></div></div><span className="date-cell">{formatDate(person.timestamp)}</span><div className="row-actions"><a className="open-profile" href={`https://www.instagram.com/${person.username}/`} target="_blank" rel="noreferrer">Profili aç <ArrowUpRight size={13}/></a>{(tab === 'pending' || tab === 'not-following') && <button className={`mark-btn ${done ? 'marked' : ''}`} onClick={() => done ? undo(kind, person.username) : mark(kind, person.username)} title={done ? 'İşareti geri al' : 'İşlem yaptığını işaretle'}>{done ? <><Check size={14}/> Tamamlandı</> : tab === 'pending' ? 'Geri çekildi işaretle' : 'Takipten çıkarıldı'}</button>}</div></div>; })}{filteredRows.length === 0 && <div className="no-results">Bu listede eşleşen hesap bulunamadı.</div>}{filteredRows.length > 300 && <div className="list-foot">İlk 300 hesap gösteriliyor. Daha dar arama yapabilir veya CSV olarak dışa aktarabilirsin.</div>}</div>
+              <div className="table-body">{filteredRows.slice(0, 300).map(person => {
+                const done = tab === 'pending' ? donePending.has(person.username) : tab === 'inactive' ? inactiveSet.has(person.username) : doneUnfollow.has(person.username);
+                const kind = tab === 'pending' ? 'pending' : tab === 'inactive' ? 'inactive' : 'unfollow';
+                return <div className={`table-row ${done ? 'is-done' : ''}`} key={person.username}>
+                  <div className="account-cell"><div className="avatar">{person.username.slice(0,1).toUpperCase()}</div><div><b>@{person.username}</b><span>Instagram hesabı</span></div></div>
+                  <span className="date-cell">{formatDate(person.timestamp)}</span>
+                  <div className="row-actions">
+                    <a className="open-profile" href={`https://www.instagram.com/${person.username}/`} target="_blank" rel="noreferrer">Profili aç <ArrowUpRight size={13}/></a>
+                    {tab === 'pending' && <button className={`mark-btn ${done ? 'marked' : ''}`} onClick={() => done ? undo('pending', person.username) : mark('pending', person.username)}>{done ? <><Check size={14}/> Tamamlandı</> : 'Geri çekildi işaretle'}</button>}
+                    {tab === 'not-following' && <><button className={`mark-btn ${doneUnfollow.has(person.username) ? 'marked' : ''}`} onClick={() => doneUnfollow.has(person.username) ? undo('unfollow', person.username) : mark('unfollow', person.username)}>{doneUnfollow.has(person.username) ? 'Takipten çıkarıldı' : 'Takipten çıkarıldı işaretle'}</button><button className="mark-btn" onClick={() => mark('inactive', person.username)}>Erişilemiyor</button></>}
+                    {tab === 'inactive' && <button className="mark-btn marked" onClick={() => undo('inactive', person.username)}>Aktif listeye geri al</button>}
+                  </div>
+                </div>;
+              })}{filteredRows.length === 0 && <div className="no-results">Bu listede eşleşen hesap bulunamadı.</div>}{filteredRows.length > 300 && <div className="list-foot">İlk 300 hesap gösteriliyor. Daha dar arama yapabilir veya CSV olarak dışa aktarabilirsin.</div>}</div>
             </section>
-            {(tab === 'pending' || tab === 'not-following') && <div className="action-note"><CircleHelp size={17}/><span><b>İşlemler manuel yapılır:</b> “Profili aç” ile Instagram'a git, isteği geri çek veya hesabı takipten çıkar; ardından burada tamamlandı olarak işaretle. Bu araç Instagram'a otomatik işlem göndermez.</span></div>}
+{(tab === 'pending' || tab === 'not-following' || tab === 'inactive') && <div className="action-note">
           </>}
           <footer className="page-footer"><span>Social Sweep · Açık kaynaklı, topluluk odaklı proje</span><button onClick={clearProgress}>İşlem işaretlerini temizle</button></footer>
         </>}
