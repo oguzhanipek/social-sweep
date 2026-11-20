@@ -4,7 +4,7 @@ import JSZip from 'jszip';
 import { Activity, ArrowDownToLine, ArrowUpRight, Check, CircleHelp, FileArchive, Heart, Instagram, LockKeyhole, RefreshCw, Search, ShieldCheck, Sparkles, Users, UserMinus, UserPlus, X } from 'lucide-react';
 
 type Person = { username: string; timestamp?: number; href?: string };
-type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string };
+type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string; audit?: { followingPath: string; followingFileCandidates: number; rawFollowingCount: number; validFollowingCount: number; duplicateFollowingCount: number; invalidFollowingCount: number; oldestFollowingAt?: number; newestFollowingAt?: number } };
 type Tab = 'overview' | 'pending' | 'not-following' | 'inactive' | 'mutual' | 'followers-only';
 const PROGRESS_KEY = 'social-sweep-progress-v1';
 
@@ -90,6 +90,7 @@ export default function App() {
   const [progress, setProgress] = useState<Record<string, string[]>>(readProgress);
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(true);
+  const [liveFollowingCount, setLiveFollowingCount] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -120,6 +121,7 @@ export default function App() {
       const paths = Object.keys(zip.files);
       const find = (filename: string) => paths.find(p => p.toLowerCase().endsWith(filename.toLowerCase()));
       const readJson = async (path?: string) => path ? JSON.parse(await zip.file(path)!.async('string')) : null;
+      const followingCandidates = paths.filter(p => (p.toLowerCase().split('/').pop() || '') === 'following.json');
       const followingPath = find('following.json');
       const pendingPath = find('pending_follow_requests.json');
       if (!followingPath) throw new Error('ZIP içinde following.json bulunamadı. Instagram dışa aktarmasında “Takipçiler ve takip edilenler” verisini seçtiğinden emin ol.');
@@ -130,12 +132,17 @@ export default function App() {
         return name === 'followers.json' || /^followers_\d+\.json$/.test(name);
       });
       const followerRaw = (await Promise.all(followerPaths.map(readJson))).flatMap(x => Array.isArray(x) ? x : []);
-      const following = uniquePeople((followingRaw?.relationships_following || []).map(personFromFollowing));
+      const rawFollowingEntries = Array.isArray(followingRaw?.relationships_following) ? followingRaw.relationships_following : [];
+      const parsedFollowingEntries = rawFollowingEntries.map(personFromFollowing);
+      const validFollowingEntries = parsedFollowingEntries.filter((x: Person | null): x is Person => Boolean(x?.username));
+      const following = uniquePeople(parsedFollowingEntries);
+      const followingTimestamps = following.map(x => x.timestamp).filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+      const audit = { followingPath, followingFileCandidates: followingCandidates.length, rawFollowingCount: rawFollowingEntries.length, validFollowingCount: validFollowingEntries.length, duplicateFollowingCount: validFollowingEntries.length - following.length, invalidFollowingCount: rawFollowingEntries.length - validFollowingEntries.length, oldestFollowingAt: followingTimestamps.length ? Math.min(...followingTimestamps) : undefined, newestFollowingAt: followingTimestamps.length ? Math.max(...followingTimestamps) : undefined };
       const followers = uniquePeople(followerRaw.map(personFromFollower));
       const pendingItems = Array.isArray(pendingRaw) ? pendingRaw : (pendingRaw?.relationships_follow_requests_sent || pendingRaw?.relationships_follow_requests || []);
       const pending = uniquePeople(pendingItems.map(personFromPending));
       if (!following.length && !followers.length && !pending.length) throw new Error('Dosyalarda okunabilir takip verisi bulunamadı. JSON dışa aktarma biçimini kontrol et.');
-      const importedDataset = { followers, following, pending, importedAt: new Date().toISOString(), fileName: file.name };
+      const importedDataset = { followers, following, pending, importedAt: new Date().toISOString(), fileName: file.name, audit };
       setData(importedDataset);
       try { await saveDatasetLocally(importedDataset); }
       catch { setNotice('Analiz tamamlandı ancak tarayıcı depolamasına kaydedilemedi. Sayfayı yenilersen ZIP dosyasını yeniden yüklemen gerekebilir.'); }
@@ -187,6 +194,22 @@ export default function App() {
           {tab === 'overview' ? <>
             <div className="section-heading"><div><div className="eyebrow">HESAP ÖZETİ</div><h2>Genel Bakış</h2><p>Yüklenen arşivdeki takip ilişkilerinin özeti.</p></div><button className="text-btn" onClick={() => setNotice(`Son içe aktarma: ${new Date(data.importedAt).toLocaleString('tr-TR')} · ${data.fileName}`)}><RefreshCw size={15}/> İçe aktarma bilgisi</button></div>
             <div className="stats-grid"><Stat icon={<Users/>} label="Takipçi" value={data.followers.length}/><Stat icon={<UserPlus/>} label="Takip edilen" value={data.following.length}/><Stat icon={<UserMinus/>} label="Seni takip etmeyen" value={notFollowing.length} accent/><Stat icon={<Activity/>} label="Bekleyen istek" value={data.pending.length}/></div>
+            <section className="panel audit-panel">
+              <div className="panel-heading"><div><h3><ShieldCheck size={17}/> Arşiv veri denetimi</h3><p>ZIP içindeki takip kayıtlarının teknik kontrolü</p></div><span className="panel-tag">YEREL RAPOR</span></div>
+              <div className="audit-grid">
+                <div><small>Ham takip kaydı</small><b>{(data.audit?.rawFollowingCount ?? data.following.length).toLocaleString('tr-TR')}</b></div>
+                <div><small>Benzersiz hesap</small><b>{data.following.length.toLocaleString('tr-TR')}</b></div>
+                <div><small>Tekrarlanan kayıt</small><b>{(data.audit?.duplicateFollowingCount ?? 0).toLocaleString('tr-TR')}</b></div>
+                <div><small>Okunamayan kayıt</small><b>{(data.audit?.invalidFollowingCount ?? 0).toLocaleString('tr-TR')}</b></div>
+              </div>
+              <div className="audit-source"><span>Okunan dosya</span><code>{data.audit?.followingPath || 'Arşiv denetimi önceki sürümde yapılmamış'}</code><span>{data.audit?.followingFileCandidates ?? '—'} adet following.json bulundu</span></div>
+              <div className="audit-compare">
+                <label htmlFor="live-following-count">Instagram profilindeki güncel “takip” sayısı</label>
+                <input id="live-following-count" inputMode="numeric" type="number" min="0" value={liveFollowingCount} onChange={e => setLiveFollowingCount(e.target.value)} placeholder="Örn. 285"/>
+                {liveFollowingCount !== '' && Number.isFinite(Number(liveFollowingCount)) && Number(liveFollowingCount) >= 0 && <div className="audit-difference"><span>Arşiv ile fark</span><b>{(data.following.length - Number(liveFollowingCount)).toLocaleString('tr-TR')} hesap</b></div>}
+              </div>
+              <p className="audit-footnote">Bu karşılaştırma yalnızca sayıları gösterir. Farkın nedeni hakkında tek başına kesin sonuç vermez; arşiv tarihi, dosya kapsamı ve Instagram'daki güncel durum ayrıca incelenmelidir.</p>
+            </section>
             <div className="content-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h3>Takip dağılımı</h3><p>Takip ettiğin hesapların durumu</p></div><span className="panel-tag">ÖZET</span></div><div className="distribution"><div className="donut" style={{'--mutual': `${data.following.length ? mutual.length / data.following.length * 100 : 0}%`} as CSSProperties}><div><b>{data.following.length ? Math.round(mutual.length / data.following.length * 100) : 0}%</b><span>karşılıklı</span></div></div><div className="legend"><Legend color="purple" label="Karşılıklı takip" value={mutual.length}/><Legend color="orange" label="Geri takip etmeyen" value={notFollowing.length}/></div></div></section>
               <section className="panel quick-panel"><div className="panel-heading"><div><h3>Hızlı işlemler</h3><p>Analiz listelerine geç</p></div><Sparkles size={18} className="muted-icon"/></div><QuickAction icon={<UserPlus/>} title="Bekleyen istekler" detail={`${data.pending.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('pending')}/><QuickAction icon={<UserMinus/>} title="Geri takip etmeyenler" detail={`${notFollowing.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('not-following')}/><QuickAction icon={<Heart/>} title="Karşılıklı takip" detail={`${mutual.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('mutual')}/></section></div>
             <div className="privacy-banner"><ShieldCheck size={20}/><div><b>Gizlilik öncelikli tasarım</b><span>Arşivin tarayıcında okunur. Instagram şifreni istemeyiz ve hesabına senin adına giriş yapmayız.</span></div></div>
