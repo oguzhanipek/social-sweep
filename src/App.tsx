@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import JSZip from 'jszip';
 import { Activity, ArrowDownToLine, ArrowUpRight, Check, CircleHelp, FileArchive, Heart, Instagram, LockKeyhole, RefreshCw, Search, ShieldCheck, Sparkles, Users, UserMinus, UserPlus, X } from 'lucide-react';
@@ -44,6 +44,38 @@ function uniquePeople(list: Array<Person | null>): Person[] {
 function readProgress(): Record<string, string[]> {
   try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; }
 }
+const DATA_DB_NAME = 'social-sweep-local';
+const DATA_STORE_NAME = 'imports';
+function openDataDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATA_DB_NAME, 1);
+    request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(DATA_STORE_NAME)) request.result.createObjectStore(DATA_STORE_NAME); };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Yerel veri deposu açılamadı.'));
+  });
+}
+async function saveDatasetLocally(dataset: Dataset): Promise<void> {
+  const db = await openDataDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(DATA_STORE_NAME, 'readwrite');
+    tx.objectStore(DATA_STORE_NAME).put(dataset, 'latest');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('Arşiv yerel olarak kaydedilemedi.'));
+    tx.onabort = () => reject(tx.error || new Error('Arşiv kaydı iptal edildi.'));
+  });
+  db.close();
+}
+async function loadDatasetLocally(): Promise<Dataset | null> {
+  const db = await openDataDb();
+  const value = await new Promise<Dataset | null>((resolve, reject) => {
+    const tx = db.transaction(DATA_STORE_NAME, 'readonly');
+    const request = tx.objectStore(DATA_STORE_NAME).get('latest');
+    request.onsuccess = () => resolve((request.result as Dataset | undefined) || null);
+    request.onerror = () => reject(request.error || new Error('Kayıtlı arşiv okunamadı.'));
+  });
+  db.close();
+  return value;
+}
 function formatDate(timestamp?: number) {
   if (!timestamp) return 'Tarih bilgisi yok';
   return new Intl.DateTimeFormat('tr-TR', { dateStyle: 'medium' }).format(new Date(timestamp * 1000));
@@ -57,6 +89,18 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState<Record<string, string[]>>(readProgress);
   const [busy, setBusy] = useState(false);
+  const [restoring, setRestoring] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    loadDatasetLocally().then(saved => {
+      if (!active) return;
+      if (saved) { setData(saved); setNotice('Önceki Instagram arşivin bu tarayıcıdan geri yüklendi. Yeniden ZIP yüklemene gerek yok.'); }
+    }).catch(() => {
+      if (active) setNotice('Önceki arşiv geri yüklenemedi. ZIP dosyanı yeniden yükleyebilirsin.');
+    }).finally(() => { if (active) setRestoring(false); });
+    return () => { active = false; };
+  }, []);
 
   const followingSet = useMemo(() => new Set((data?.following || []).map(x => x.username)), [data]);
   const followerSet = useMemo(() => new Set((data?.followers || []).map(x => x.username)), [data]);
@@ -91,7 +135,10 @@ export default function App() {
       const pendingItems = Array.isArray(pendingRaw) ? pendingRaw : (pendingRaw?.relationships_follow_requests_sent || pendingRaw?.relationships_follow_requests || []);
       const pending = uniquePeople(pendingItems.map(personFromPending));
       if (!following.length && !followers.length && !pending.length) throw new Error('Dosyalarda okunabilir takip verisi bulunamadı. JSON dışa aktarma biçimini kontrol et.');
-      setData({ followers, following, pending, importedAt: new Date().toISOString(), fileName: file.name });
+      const importedDataset = { followers, following, pending, importedAt: new Date().toISOString(), fileName: file.name };
+      setData(importedDataset);
+      try { await saveDatasetLocally(importedDataset); }
+      catch { setNotice('Analiz tamamlandı ancak tarayıcı depolamasına kaydedilemedi. Sayfayı yenilersen ZIP dosyasını yeniden yüklemen gerekebilir.'); }
       setTab('overview'); setSearch('');
       setNotice(`Analiz tamamlandı: ${following.length.toLocaleString('tr-TR')} takip, ${followers.length.toLocaleString('tr-TR')} takipçi, ${pending.length.toLocaleString('tr-TR')} bekleyen istek.`);
     } catch (e) { setNotice(e instanceof Error ? e.message : 'ZIP dosyası okunamadı.'); }
@@ -136,7 +183,7 @@ export default function App() {
       <div className="page-wrap">
         <section className="hero"><div><div className="eyebrow"><Sparkles size={14}/> SOSYAL HESAP ANALİZİ</div><h1>Takip ilişkilerini<br/><span>kontrol altına al.</span></h1><p>Instagram verilerini içe aktar, takip durumunu analiz et ve hesabını kendi kontrolünle düzenle.</p><div className="hero-actions"><button className="primary-btn" onClick={() => fileRef.current?.click()} disabled={busy}><FileArchive size={17}/>{busy ? 'Dosya analiz ediliyor…' : data ? 'Yeni ZIP yükle' : 'Instagram ZIP dosyasını yükle'}</button>{data && <span className="imported"><CheckCircleIcon/> Veri yüklendi</span>}</div><input ref={fileRef} type="file" accept=".zip,application/zip" hidden onChange={e => importZip(e.target.files?.[0])}/></div><div className="hero-art"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="art-center"><Instagram size={38}/></div><div className="float-card card-a"><UserPlus size={15}/><span>Takip istekleri</span></div><div className="float-card card-b"><Users size={15}/><span>Takip analizi</span></div><div className="float-dot"/></div></section>
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')}><X size={16}/></button></div>}
-        {!data ? <section className="empty-state"><div className="empty-icon"><FileArchive size={26}/></div><h2>Henüz bir Instagram arşivi yüklenmedi</h2><p>Instagram'dan indirdiğin ZIP dosyasını seç. Analiz tamamen bu tarayıcıda yapılır; dosyan hiçbir yere gönderilmez.</p><button className="secondary-btn" onClick={() => fileRef.current?.click()}>Dosya seç <ArrowUpRight size={16}/></button><div className="howto"><b>İpucu</b><span>Instagram Hesaplar Merkezi → Bilgilerin ve izinlerin → Bilgilerini indir veya aktar → Takipçiler ve takip edilenler → JSON</span></div></section> : <>
+        {!data ? <section className="empty-state"><div className="empty-icon"><FileArchive size={26}/></div><h2>{restoring ? 'Kayıtlı arşiv kontrol ediliyor…' : 'Henüz bir Instagram arşivi yüklenmedi'}</h2><p>{restoring ? 'Bu tarayıcıda daha önce içe aktardığın veriler aranıyor.' : 'Instagram arşivini seç. Analiz tamamen bu tarayıcıda yapılır; dosyan hiçbir yere gönderilmez.'}</p>{!restoring && <button className="secondary-btn" onClick={() => fileRef.current?.click()}>Dosya seç <ArrowUpRight size={16}/></button>}<div className="howto"><b>İpucu</b><span>Instagram Hesaplar Merkezi → Bilgilerin ve izinlerin → Bilgilerini indir veya aktar → Takipçiler ve takip edilenler → JSON</span></div></section> : <>
           {tab === 'overview' ? <>
             <div className="section-heading"><div><div className="eyebrow">HESAP ÖZETİ</div><h2>Genel Bakış</h2><p>Yüklenen arşivdeki takip ilişkilerinin özeti.</p></div><button className="text-btn" onClick={() => setNotice(`Son içe aktarma: ${new Date(data.importedAt).toLocaleString('tr-TR')} · ${data.fileName}`)}><RefreshCw size={15}/> İçe aktarma bilgisi</button></div>
             <div className="stats-grid"><Stat icon={<Users/>} label="Takipçi" value={data.followers.length}/><Stat icon={<UserPlus/>} label="Takip edilen" value={data.following.length}/><Stat icon={<UserMinus/>} label="Seni takip etmeyen" value={notFollowing.length} accent/><Stat icon={<Activity/>} label="Bekleyen istek" value={data.pending.length}/></div>
