@@ -1,0 +1,150 @@
+import { useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import JSZip from 'jszip';
+import { Activity, ArrowDownToLine, ArrowUpRight, Check, CircleHelp, FileArchive, Heart, Instagram, LockKeyhole, RefreshCw, Search, ShieldCheck, Sparkles, Users, UserMinus, UserPlus, X } from 'lucide-react';
+
+type Person = { username: string; timestamp?: number; href?: string };
+type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string };
+type Tab = 'overview' | 'pending' | 'not-following' | 'mutual' | 'followers-only';
+const PROGRESS_KEY = 'social-sweep-progress-v1';
+
+function cleanUsername(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.trim().replace(/^@/, '').replace(/^https?:\\/\\/(www\\.)?instagram\\.com\\//i, '').replace(/^_u\\//, '').replace(/\\/$/, '').toLowerCase();
+}
+function personFromFollowing(item: any): Person | null {
+  const username = cleanUsername(item?.title || item?.string_list_data?.[0]?.value);
+  return username ? { username, timestamp: item?.string_list_data?.[0]?.timestamp, href: `https://www.instagram.com/${username}/` } : null;
+}
+function personFromFollower(item: any): Person | null {
+  const entry = (item?.string_list_data || []).find((x: any) => x?.value || x?.href);
+  const username = cleanUsername(entry?.value || entry?.href);
+  return username ? { username, timestamp: entry?.timestamp, href: `https://www.instagram.com/${username}/` } : null;
+}
+function personFromPending(item: any): Person | null {
+  const labels = item?.label_values || [];
+  const userField = labels.find((x: any) => String(x?.label || '').toLocaleLowerCase().includes('kullan'));
+  const linkField = labels.find((x: any) => String(x?.label || '').toLocaleLowerCase().includes('url'));
+  const direct = item?.string_list_data?.[0]?.value || item?.title;
+  const username = cleanUsername(direct || userField?.value || linkField?.value);
+  return username ? { username, timestamp: item?.timestamp || item?.string_list_data?.[0]?.timestamp, href: `https://www.instagram.com/${username}/` } : null;
+}
+function uniquePeople(list: Array<Person | null>): Person[] {
+  const map = new Map<string, Person>();
+  list.forEach(p => { if (p?.username) map.set(p.username, p); });
+  return [...map.values()].sort((a, b) => a.username.localeCompare(b.username));
+}
+function readProgress(): Record<string, string[]> {
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; }
+}
+function formatDate(timestamp?: number) {
+  if (!timestamp) return 'Tarih bilgisi yok';
+  return new Intl.DateTimeFormat('tr-TR', { dateStyle: 'medium' }).format(new Date(timestamp * 1000));
+}
+
+export default function App() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [data, setData] = useState<Dataset | null>(null);
+  const [tab, setTab] = useState<Tab>('overview');
+  const [search, setSearch] = useState('');
+  const [notice, setNotice] = useState('');
+  const [progress, setProgress] = useState<Record<string, string[]>>(readProgress);
+  const [busy, setBusy] = useState(false);
+
+  const followingSet = useMemo(() => new Set((data?.following || []).map(x => x.username)), [data]);
+  const followerSet = useMemo(() => new Set((data?.followers || []).map(x => x.username)), [data]);
+  const notFollowing = useMemo(() => (data?.following || []).filter(x => !followerSet.has(x.username)), [data, followerSet]);
+  const mutual = useMemo(() => (data?.following || []).filter(x => followerSet.has(x.username)), [data, followerSet]);
+  const followersOnly = useMemo(() => (data?.followers || []).filter(x => !followingSet.has(x.username)), [data, followingSet]);
+  const donePending = new Set(progress.pending || []);
+  const doneUnfollow = new Set(progress.unfollow || []);
+
+  async function importZip(file?: File) {
+    if (!file) return;
+    setBusy(true); setNotice('ZIP dosyası taranıyor…');
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const paths = Object.keys(zip.files);
+      const find = (filename: string) => paths.find(p => p.toLowerCase().endsWith(filename.toLowerCase()));
+      const readJson = async (path?: string) => path ? JSON.parse(await zip.file(path)!.async('string')) : null;
+      const followingPath = find('following.json');
+      const pendingPath = find('pending_follow_requests.json');
+      if (!followingPath) throw new Error('ZIP içinde following.json bulunamadı. Instagram dışa aktarmasında “Takipçiler ve takip edilenler” verisini seçtiğinden emin ol.');
+      const followingRaw = await readJson(followingPath);
+      const pendingRaw = pendingPath ? await readJson(pendingPath) : [];
+      const followerPaths = paths.filter(p => /(^|\\/)followers(_\\d+)?\\.json$/i.test(p));
+      const followerRaw = (await Promise.all(followerPaths.map(readJson))).flatMap(x => Array.isArray(x) ? x : []);
+      const following = uniquePeople((followingRaw?.relationships_following || []).map(personFromFollowing));
+      const followers = uniquePeople(followerRaw.map(personFromFollower));
+      const pendingItems = Array.isArray(pendingRaw) ? pendingRaw : (pendingRaw?.relationships_follow_requests_sent || pendingRaw?.relationships_follow_requests || []);
+      const pending = uniquePeople(pendingItems.map(personFromPending));
+      if (!following.length && !followers.length && !pending.length) throw new Error('Dosyalarda okunabilir takip verisi bulunamadı. JSON dışa aktarma biçimini kontrol et.');
+      setData({ followers, following, pending, importedAt: new Date().toISOString(), fileName: file.name });
+      setTab('overview'); setSearch('');
+      setNotice(`Analiz tamamlandı: ${following.length.toLocaleString('tr-TR')} takip, ${followers.length.toLocaleString('tr-TR')} takipçi, ${pending.length.toLocaleString('tr-TR')} bekleyen istek.`);
+    } catch (e) { setNotice(e instanceof Error ? e.message : 'ZIP dosyası okunamadı.'); }
+    finally { setBusy(false); if (fileRef.current) fileRef.current.value = ''; }
+  }
+  function mark(kind: 'pending' | 'unfollow', username: string) {
+    const next = { ...progress, [kind]: [...new Set([...(progress[kind] || []), username])] };
+    setProgress(next); localStorage.setItem(PROGRESS_KEY, JSON.stringify(next));
+  }
+  function undo(kind: 'pending' | 'unfollow', username: string) {
+    const next = { ...progress, [kind]: (progress[kind] || []).filter(x => x !== username) };
+    setProgress(next); localStorage.setItem(PROGRESS_KEY, JSON.stringify(next));
+  }
+  function clearProgress() {
+    if (!confirm('Bu tarayıcıda kaydedilen işlem işaretleri silinsin mi?')) return;
+    localStorage.removeItem(PROGRESS_KEY); setProgress({});
+  }
+  function exportCsv(rows: Person[], label: string) {
+    const csv = ['username,profile_url,date', ...rows.map(x => `${x.username},https://www.instagram.com/${x.username}/,${formatDate(x.timestamp)}`)].join('\\n');
+    const blob = new Blob(['\\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `social-sweep-${label}.csv`; a.click(); URL.revokeObjectURL(url);
+  }
+
+  const currentRows = tab === 'pending' ? (data?.pending || []) : tab === 'not-following' ? notFollowing : tab === 'mutual' ? mutual : tab === 'followers-only' ? followersOnly : [];
+  const filteredRows = currentRows.filter(x => x.username.includes(search.toLowerCase().replace(/^@/, '')));
+  const title = tab === 'pending' ? 'Bekleyen takip istekleri' : tab === 'not-following' ? 'Seni takip etmeyenler' : tab === 'mutual' ? 'Karşılıklı takip' : 'Seni takip edenler';
+
+  return <div className="app-shell">
+    <aside className="sidebar">
+      <div className="brand"><div className="brand-icon"><Activity size={21}/></div><div><b>social sweep</b><span>Instagram toolkit</span></div></div>
+      <div className="side-label">ÇALIŞMA ALANI</div>
+      <button className={`nav-item ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}><Activity size={18}/> Genel Bakış</button>
+      <button className={`nav-item ${tab === 'pending' ? 'active' : ''}`} onClick={() => setTab('pending')}><UserPlus size={18}/> Bekleyen istekler {data && <em>{data.pending.length}</em>}</button>
+      <button className={`nav-item ${tab === 'not-following' ? 'active' : ''}`} onClick={() => setTab('not-following')}><UserMinus size={18}/> Geri takip etmeyenler {data && <em>{notFollowing.length}</em>}</button>
+      <button className={`nav-item ${tab === 'mutual' ? 'active' : ''}`} onClick={() => setTab('mutual')}><Heart size={18}/> Karşılıklı takip</button>
+      <button className={`nav-item ${tab === 'followers-only' ? 'active' : ''}`} onClick={() => setTab('followers-only')}><Users size={18}/> Seni takip edenler</button>
+      <div className="sidebar-bottom"><div className="privacy-mini"><LockKeyhole size={16}/><span>Verilerin cihazından çıkmaz.</span></div><a href="https://github.com/oguzhanipek/social-sweep" target="_blank" rel="noreferrer">GitHub projesi <ArrowUpRight size={14}/></a></div>
+    </aside>
+    <main className="main-content">
+      <header className="topbar"><div className="crumb">Workspace <span>/</span> Instagram analytics</div><div className="top-actions"><span className="local-pill"><span/> Yerel analiz</span><button className="icon-button" title="Veri gizliliği" onClick={() => setNotice('ZIP dosyan yalnızca tarayıcında işlenir. Herhangi bir sunucuya yüklenmez.')}><ShieldCheck size={18}/></button></div></header>
+      <div className="page-wrap">
+        <section className="hero"><div><div className="eyebrow"><Sparkles size={14}/> SOSYAL HESAP ANALİZİ</div><h1>Takip ilişkilerini<br/><span>kontrol altına al.</span></h1><p>Instagram verilerini içe aktar, takip durumunu analiz et ve hesabını kendi kontrolünle düzenle.</p><div className="hero-actions"><button className="primary-btn" onClick={() => fileRef.current?.click()} disabled={busy}><FileArchive size={17}/>{busy ? 'Dosya analiz ediliyor…' : data ? 'Yeni ZIP yükle' : 'Instagram ZIP dosyasını yükle'}</button>{data && <span className="imported"><CheckCircleIcon/> Veri yüklendi</span>}</div><input ref={fileRef} type="file" accept=".zip,application/zip" hidden onChange={e => importZip(e.target.files?.[0])}/></div><div className="hero-art"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="art-center"><Instagram size={38}/></div><div className="float-card card-a"><UserPlus size={15}/><span>Takip istekleri</span></div><div className="float-card card-b"><Users size={15}/><span>Takip analizi</span></div><div className="float-dot"/></div></section>
+        {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')}><X size={16}/></button></div>}
+        {!data ? <section className="empty-state"><div className="empty-icon"><FileArchive size={26}/></div><h2>Henüz bir Instagram arşivi yüklenmedi</h2><p>Instagram'dan indirdiğin ZIP dosyasını seç. Analiz tamamen bu tarayıcıda yapılır; dosyan hiçbir yere gönderilmez.</p><button className="secondary-btn" onClick={() => fileRef.current?.click()}>Dosya seç <ArrowUpRight size={16}/></button><div className="howto"><b>İpucu</b><span>Instagram Hesaplar Merkezi → Bilgilerin ve izinlerin → Bilgilerini indir veya aktar → Takipçiler ve takip edilenler → JSON</span></div></section> : <>
+          {tab === 'overview' ? <>
+            <div className="section-heading"><div><div className="eyebrow">HESAP ÖZETİ</div><h2>Genel Bakış</h2><p>Yüklenen arşivdeki takip ilişkilerinin özeti.</p></div><button className="text-btn" onClick={() => setNotice(`Son içe aktarma: ${new Date(data.importedAt).toLocaleString('tr-TR')} · ${data.fileName}`)}><RefreshCw size={15}/> İçe aktarma bilgisi</button></div>
+            <div className="stats-grid"><Stat icon={<Users/>} label="Takipçi" value={data.followers.length}/><Stat icon={<UserPlus/>} label="Takip edilen" value={data.following.length}/><Stat icon={<UserMinus/>} label="Seni takip etmeyen" value={notFollowing.length} accent/><Stat icon={<Activity/>} label="Bekleyen istek" value={data.pending.length}/></div>
+            <div className="content-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h3>Takip dağılımı</h3><p>Takip ettiğin hesapların durumu</p></div><span className="panel-tag">ÖZET</span></div><div className="distribution"><div className="donut" style={{'--mutual': `${data.following.length ? mutual.length / data.following.length * 100 : 0}%`} as CSSProperties}><div><b>{data.following.length ? Math.round(mutual.length / data.following.length * 100) : 0}%</b><span>karşılıklı</span></div></div><div className="legend"><Legend color="purple" label="Karşılıklı takip" value={mutual.length}/><Legend color="orange" label="Geri takip etmeyen" value={notFollowing.length}/></div></div></section>
+              <section className="panel quick-panel"><div className="panel-heading"><div><h3>Hızlı işlemler</h3><p>Analiz listelerine geç</p></div><Sparkles size={18} className="muted-icon"/></div><QuickAction icon={<UserPlus/>} title="Bekleyen istekler" detail={`${data.pending.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('pending')}/><QuickAction icon={<UserMinus/>} title="Geri takip etmeyenler" detail={`${notFollowing.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('not-following')}/><QuickAction icon={<Heart/>} title="Karşılıklı takip" detail={`${mutual.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('mutual')}/></section></div>
+            <div className="privacy-banner"><ShieldCheck size={20}/><div><b>Gizlilik öncelikli tasarım</b><span>Arşivin tarayıcında okunur. Instagram şifreni istemeyiz ve hesabına senin adına giriş yapmayız.</span></div></div>
+          </> : <>
+            <div className="section-heading"><div><div className="eyebrow">TAKİP YÖNETİMİ</div><h2>{title}</h2><p>{tab === 'pending' ? 'Gönderdiğin ve henüz yanıtlanmamış takip istekleri.' : tab === 'not-following' ? 'Senin takip ettiğin ancak arşivde seni takip ediyor görünmeyen hesaplar.' : tab === 'mutual' ? 'Birbirinizi takip ettiğiniz hesaplar.' : 'Seni takip eden ancak senin takip etmediğin hesaplar.'}</p></div><button className="text-btn" onClick={() => exportCsv(currentRows, tab)}><ArrowDownToLine size={15}/> CSV dışa aktar</button></div>
+            <section className="panel table-panel"><div className="table-toolbar"><div className="searchbox"><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Kullanıcı adı ara…"/></div><div className="result-count"><span className="filter-symbol">⌕</span> {filteredRows.length.toLocaleString('tr-TR')} sonuç</div></div>
+              <div className="table-head"><span>HESAP</span><span>ARŞİV TARİHİ</span><span>İŞLEM</span></div>
+              <div className="table-body">{filteredRows.slice(0, 300).map(person => { const done = tab === 'pending' ? donePending.has(person.username) : doneUnfollow.has(person.username); const kind = tab === 'pending' ? 'pending' : 'unfollow'; return <div className={`table-row ${done ? 'is-done' : ''}`} key={person.username}><div className="account-cell"><div className="avatar">{person.username.slice(0,1).toUpperCase()}</div><div><b>@{person.username}</b><span>Instagram hesabı</span></div></div><span className="date-cell">{formatDate(person.timestamp)}</span><div className="row-actions"><a className="open-profile" href={`https://www.instagram.com/${person.username}/`} target="_blank" rel="noreferrer">Profili aç <ArrowUpRight size={13}/></a>{(tab === 'pending' || tab === 'not-following') && <button className={`mark-btn ${done ? 'marked' : ''}`} onClick={() => done ? undo(kind, person.username) : mark(kind, person.username)} title={done ? 'İşareti geri al' : 'İşlem yaptığını işaretle'}>{done ? <><Check size={14}/> Tamamlandı</> : tab === 'pending' ? 'Geri çekildi işaretle' : 'Takipten çıkarıldı'}</button>}</div></div>; })}{filteredRows.length === 0 && <div className="no-results">Bu listede eşleşen hesap bulunamadı.</div>}{filteredRows.length > 300 && <div className="list-foot">İlk 300 hesap gösteriliyor. Daha dar arama yapabilir veya CSV olarak dışa aktarabilirsin.</div>}</div>
+            </section>
+            {(tab === 'pending' || tab === 'not-following') && <div className="action-note"><CircleHelp size={17}/><span><b>İşlemler manuel yapılır:</b> “Profili aç” ile Instagram'a git, isteği geri çek veya hesabı takipten çıkar; ardından burada tamamlandı olarak işaretle. Bu araç Instagram'a otomatik işlem göndermez.</span></div>}
+          </>}
+          <footer className="page-footer"><span>Social Sweep · Açık kaynaklı, topluluk odaklı proje</span><button onClick={clearProgress}>İşlem işaretlerini temizle</button></footer>
+        </>}
+      </div>
+    </main>
+  </div>;
+}
+function CheckCircleIcon(){return <span className="check-circle"><Check size={11}/></span>}
+function Stat({icon,label,value,accent=false}:{icon:ReactNode;label:string;value:number;accent?:boolean}){return <div className="stat-card"><div className={`stat-icon ${accent?'orange':''}`}>{icon}</div><span>{label}</span><b>{value.toLocaleString('tr-TR')}</b><small>İçe aktarılan arşiv</small></div>}
+function Legend({color,label,value}:{color:string;label:string;value:number}){return <div className="legend-row"><i className={color}/><span>{label}</span><b>{value.toLocaleString('tr-TR')}</b></div>}
+function QuickAction({icon,title,detail,onClick}:{icon:ReactNode;title:string;detail:string;onClick:()=>void}){return <button className="quick-action" onClick={onClick}><span className="quick-icon">{icon}</span><span className="quick-copy"><b>{title}</b><small>{detail}</small></span><ArrowUpRight size={16}/></button>}
