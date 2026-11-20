@@ -108,8 +108,8 @@ export default function App() {
     localStorage.removeItem(PROGRESS_KEY); setProgress({});
   }
   function exportCsv(rows: Person[], label: string) {
-    const csv = ['username,profile_url,date', ...rows.map(x => \`${x.username},https://www.instagram.com/${x.username}/,${formatDate(x.timestamp)}\`)].join('\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const csv = ['username,profile_url,date', ...rows.map(x => x.username + ',https://www.instagram.com/' + x.username + '/,' + formatDate(x.timestamp))].join(String.fromCharCode(10));
+    const blob = new Blob([String.fromCharCode(65279) + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `social-sweep-${label}.csv`; a.click(); URL.revokeObjectURL(url);
   }
 
