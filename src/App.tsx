@@ -10,7 +10,7 @@ const PROGRESS_KEY = 'social-sweep-progress-v1';
 
 function cleanUsername(value: unknown): string {
   if (typeof value !== 'string') return '';
-  return value.trim().replace(/^@/, '').replace(/^https?:\\/\\/(www\\.)?instagram\\.com\\//i, '').replace(/^_u\\//, '').replace(/\\/$/, '').toLowerCase();
+  return value.trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/^_u\//, '').replace(/\/$/, '').toLowerCase();
 }
 function personFromFollowing(item: any): Person | null {
   const username = cleanUsername(item?.title || item?.string_list_data?.[0]?.value);
@@ -72,7 +72,7 @@ export default function App() {
       if (!followingPath) throw new Error('ZIP içinde following.json bulunamadı. Instagram dışa aktarmasında “Takipçiler ve takip edilenler” verisini seçtiğinden emin ol.');
       const followingRaw = await readJson(followingPath);
       const pendingRaw = pendingPath ? await readJson(pendingPath) : [];
-      const followerPaths = paths.filter(p => /(^|\\/)followers(_\\d+)?\\.json$/i.test(p));
+      const followerPaths = paths.filter(p => /(^|\/)followers(_\d+)?\.json$/i.test(p));
       const followerRaw = (await Promise.all(followerPaths.map(readJson))).flatMap(x => Array.isArray(x) ? x : []);
       const following = uniquePeople((followingRaw?.relationships_following || []).map(personFromFollowing));
       const followers = uniquePeople(followerRaw.map(personFromFollower));
@@ -98,8 +98,8 @@ export default function App() {
     localStorage.removeItem(PROGRESS_KEY); setProgress({});
   }
   function exportCsv(rows: Person[], label: string) {
-    const csv = ['username,profile_url,date', ...rows.map(x => `${x.username},https://www.instagram.com/${x.username}/,${formatDate(x.timestamp)}`)].join('\\n');
-    const blob = new Blob(['\\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const csv = ['username,profile_url,date', ...rows.map(x => \`${x.username},https://www.instagram.com/${x.username}/,${formatDate(x.timestamp)}\`)].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `social-sweep-${label}.csv`; a.click(); URL.revokeObjectURL(url);
   }
 
