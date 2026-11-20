@@ -10,7 +10,14 @@ const PROGRESS_KEY = 'social-sweep-progress-v1';
 
 function cleanUsername(value: unknown): string {
   if (typeof value !== 'string') return '';
-  return value.trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/^_u\//, '').replace(/\/$/, '').toLowerCase();
+  let candidate = value.trim();
+  if (candidate.startsWith('@')) candidate = candidate.slice(1);
+  if (candidate.toLowerCase().startsWith('http')) {
+    try { candidate = new URL(candidate).pathname; } catch { return ''; }
+  }
+  candidate = candidate.split('/').filter(Boolean).pop() || candidate;
+  if (candidate.startsWith('_u/')) candidate = candidate.slice(3);
+  return candidate.toLowerCase();
 }
 function personFromFollowing(item: any): Person | null {
   const username = cleanUsername(item?.title || item?.string_list_data?.[0]?.value);
@@ -72,7 +79,10 @@ export default function App() {
       if (!followingPath) throw new Error('ZIP içinde following.json bulunamadı. Instagram dışa aktarmasında “Takipçiler ve takip edilenler” verisini seçtiğinden emin ol.');
       const followingRaw = await readJson(followingPath);
       const pendingRaw = pendingPath ? await readJson(pendingPath) : [];
-      const followerPaths = paths.filter(p => /(^|\/)followers(_\d+)?\.json$/i.test(p));
+      const followerPaths = paths.filter(p => {
+        const name = p.toLowerCase().split('/').pop() || '';
+        return name === 'followers.json' || /^followers_\d+\.json$/.test(name);
+      });
       const followerRaw = (await Promise.all(followerPaths.map(readJson))).flatMap(x => Array.isArray(x) ? x : []);
       const following = uniquePeople((followingRaw?.relationships_following || []).map(personFromFollowing));
       const followers = uniquePeople(followerRaw.map(personFromFollower));
