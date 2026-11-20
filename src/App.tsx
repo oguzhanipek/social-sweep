@@ -5,8 +5,9 @@ import { Activity, ArrowDownToLine, ArrowUpRight, Check, CircleHelp, FileArchive
 
 type Person = { username: string; timestamp?: number; href?: string };
 type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string; audit?: { followingPath: string; followingFileCandidates: number; rawFollowingCount: number; validFollowingCount: number; duplicateFollowingCount: number; invalidFollowingCount: number; oldestFollowingAt?: number; newestFollowingAt?: number } };
-type Tab = 'overview' | 'pending' | 'not-following' | 'inactive' | 'mutual' | 'followers-only';
+type Tab = 'overview' | 'pending' | 'not-following' | 'inactive' | 'mutual' | 'followers-only' | 'archive-extra';
 const PROGRESS_KEY = 'social-sweep-progress-v1';
+const CURRENT_FOLLOWING_KEY = 'social-sweep-current-following-v1';
 
 function cleanUsername(value: unknown): string {
   if (typeof value !== 'string') return '';
@@ -35,6 +36,9 @@ function personFromPending(item: any): Person | null {
   const direct = item?.string_list_data?.[0]?.value || item?.title;
   const username = cleanUsername(direct || userField?.value || linkField?.value);
   return username ? { username, timestamp: item?.timestamp || item?.string_list_data?.[0]?.timestamp, href: `https://www.instagram.com/${username}/` } : null;
+}
+function parseUsernames(text: string): string[] {
+  return [...new Set(text.split(/[\s,;]+/).map(token => cleanUsername(token)).filter(Boolean))];
 }
 function uniquePeople(list: Array<Person | null>): Person[] {
   const map = new Map<string, Person>();
@@ -91,6 +95,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(true);
   const [liveFollowingCount, setLiveFollowingCount] = useState('');
+  const [currentFollowingText, setCurrentFollowingText] = useState(() => localStorage.getItem(CURRENT_FOLLOWING_KEY) || '');
+  const [currentFollowing, setCurrentFollowing] = useState<string[]>(() => parseUsernames(localStorage.getItem(CURRENT_FOLLOWING_KEY) || ''));
 
   useEffect(() => {
     let active = true;
@@ -104,6 +110,8 @@ export default function App() {
   }, []);
 
   const followingSet = useMemo(() => new Set((data?.following || []).map(x => x.username)), [data]);
+  const currentFollowingSet = useMemo(() => new Set(currentFollowing), [currentFollowing]);
+  const archiveOnly = useMemo(() => currentFollowingSet.size ? (data?.following || []).filter(x => !currentFollowingSet.has(x.username)) : [], [data, currentFollowingSet]);
   const followerSet = useMemo(() => new Set((data?.followers || []).map(x => x.username)), [data]);
   const inactiveSet = new Set(progress.inactive || []);
   const inactiveAccounts = useMemo(() => (data?.following || []).filter(x => inactiveSet.has(x.username)), [data, progress.inactive]);
@@ -159,6 +167,16 @@ export default function App() {
     const next = { ...progress, [kind]: (progress[kind] || []).filter(x => x !== username) };
     setProgress(next); localStorage.setItem(PROGRESS_KEY, JSON.stringify(next));
   }
+  function saveCurrentFollowing() {
+    const parsed = parseUsernames(currentFollowingText);
+    if (!parsed.length) { setNotice('Karşılaştırma için güncel takip listesine kullanıcı adlarını ekle.'); return; }
+    const parsedSet = new Set(parsed);
+    const archiveOnlyCount = (data?.following || []).filter(x => !parsedSet.has(x.username)).length;
+    setCurrentFollowing(parsed);
+    localStorage.setItem(CURRENT_FOLLOWING_KEY, parsed.join('\n'));
+    setTab('archive-extra');
+    setNotice(`Güncel liste kaydedildi: ${parsed.length.toLocaleString('tr-TR')} hesap. Arşivde olup bu listede bulunmayan ${archiveOnlyCount.toLocaleString('tr-TR')} kayıt bulundu.`);
+  }
   function clearProgress() {
     if (!confirm('Bu tarayıcıda kaydedilen işlem işaretleri silinsin mi?')) return;
     localStorage.removeItem(PROGRESS_KEY); setProgress({});
@@ -169,9 +187,9 @@ export default function App() {
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `social-sweep-${label}.csv`; a.click(); URL.revokeObjectURL(url);
   }
 
-  const currentRows = tab === 'pending' ? (data?.pending || []) : tab === 'not-following' ? notFollowing : tab === 'inactive' ? inactiveAccounts : tab === 'mutual' ? mutual : tab === 'followers-only' ? followersOnly : [];
+  const currentRows = tab === 'pending' ? (data?.pending || []) : tab === 'not-following' ? notFollowing : tab === 'inactive' ? inactiveAccounts : tab === 'mutual' ? mutual : tab === 'followers-only' ? followersOnly : tab === 'archive-extra' ? archiveOnly : [];
   const filteredRows = currentRows.filter(x => x.username.includes(search.toLowerCase().replace(/^@/, '')));
-  const title = tab === 'pending' ? 'Bekleyen takip istekleri' : tab === 'not-following' ? 'Seni takip etmeyenler' : tab === 'inactive' ? 'Erişilemeyen hesaplar' : tab === 'mutual' ? 'Karşılıklı takip' : 'Seni takip edenler';
+  const title = tab === 'pending' ? 'Bekleyen takip istekleri' : tab === 'not-following' ? 'Seni takip etmeyenler' : tab === 'inactive' ? 'Erişilemeyen hesaplar' : tab === 'mutual' ? 'Karşılıklı takip' : tab === 'archive-extra' ? 'Arşivde fazladan görünenler' : 'Seni takip edenler';
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -181,6 +199,7 @@ export default function App() {
       <button className={`nav-item ${tab === 'pending' ? 'active' : ''}`} onClick={() => setTab('pending')}><UserPlus size={18}/> Bekleyen istekler {data && <em>{data.pending.length}</em>}</button>
       <button className={`nav-item ${tab === 'not-following' ? 'active' : ''}`} onClick={() => setTab('not-following')}><UserMinus size={18}/> Geri takip etmeyenler {data && <em>{notFollowing.length}</em>}</button>
       <button className={`nav-item ${tab === 'inactive' ? 'active' : ''}`} onClick={() => setTab('inactive')}><CircleHelp size={18}/> Erişilemeyen hesaplar {data && <em>{inactiveAccounts.length}</em>}</button>
+      <button className={`nav-item ${tab === 'archive-extra' ? 'active' : ''}`} onClick={() => setTab('archive-extra')}><FileArchive size={18}/> Arşivde fazladan görünenler {data && <em>{archiveOnly.length}</em>}</button>
       <button className={`nav-item ${tab === 'mutual' ? 'active' : ''}`} onClick={() => setTab('mutual')}><Heart size={18}/> Karşılıklı takip</button>
       <button className={`nav-item ${tab === 'followers-only' ? 'active' : ''}`} onClick={() => setTab('followers-only')}><Users size={18}/> Seni takip edenler</button>
       <div className="sidebar-bottom"><div className="privacy-mini"><LockKeyhole size={16}/><span>Verilerin cihazından çıkmaz.</span></div><a href="https://github.com/oguzhanipek/social-sweep" target="_blank" rel="noreferrer">GitHub projesi <ArrowUpRight size={14}/></a></div>
@@ -209,12 +228,17 @@ export default function App() {
                 {liveFollowingCount !== '' && Number.isFinite(Number(liveFollowingCount)) && Number(liveFollowingCount) >= 0 && <div className="audit-difference"><span>Arşiv ile fark</span><b>{(data.following.length - Number(liveFollowingCount)).toLocaleString('tr-TR')} hesap</b></div>}
               </div>
               <p className="audit-footnote">Bu karşılaştırma yalnızca sayıları gösterir. Farkın nedeni hakkında tek başına kesin sonuç vermez; arşiv tarihi, dosya kapsamı ve Instagram'daki güncel durum ayrıca incelenmelidir.</p>
+              <div className="archive-compare-input" style={{marginTop:18,paddingTop:16,borderTop:'1px solid var(--border, #302a42)'}}>
+                <label htmlFor="current-following-list" style={{display:'block',marginBottom:8,fontSize:13,color:'var(--muted, #a99bc9)'}}>Instagram'daki güncel takip edilen hesapların kullanıcı adları</label>
+                <textarea id="current-following-list" value={currentFollowingText} onChange={e => setCurrentFollowingText(e.target.value)} placeholder={'Her satıra bir kullanıcı adı yapıştır. Örnek:\noguzhan_ornek\nhttps://www.instagram.com/ornek/\n@baska_hesap'} rows={5} style={{width:'100%',resize:'vertical',background:'var(--surface, #100e18)',color:'inherit',border:'1px solid var(--border, #39314d)',borderRadius:10,padding:12,font:'inherit',fontSize:13,boxSizing:'border-box'}} />
+                <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',marginTop:10}}><button className="primary-btn" onClick={saveCurrentFollowing}><Check size={16}/> Listeyi kaydet ve karşılaştır</button><span className="audit-footnote">{currentFollowing.length ? `${currentFollowing.length.toLocaleString('tr-TR')} kullanıcı adı kayıtlı · ${archiveOnly.length.toLocaleString('tr-TR')} arşiv fazlası` : 'Kullanıcı adları yalnızca bu tarayıcıda saklanır.'}</span></div>
+              </div>
             </section>
             <div className="content-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h3>Takip dağılımı</h3><p>Takip ettiğin hesapların durumu</p></div><span className="panel-tag">ÖZET</span></div><div className="distribution"><div className="donut" style={{'--mutual': `${data.following.length ? mutual.length / data.following.length * 100 : 0}%`} as CSSProperties}><div><b>{data.following.length ? Math.round(mutual.length / data.following.length * 100) : 0}%</b><span>karşılıklı</span></div></div><div className="legend"><Legend color="purple" label="Karşılıklı takip" value={mutual.length}/><Legend color="orange" label="Geri takip etmeyen" value={notFollowing.length}/></div></div></section>
               <section className="panel quick-panel"><div className="panel-heading"><div><h3>Hızlı işlemler</h3><p>Analiz listelerine geç</p></div><Sparkles size={18} className="muted-icon"/></div><QuickAction icon={<UserPlus/>} title="Bekleyen istekler" detail={`${data.pending.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('pending')}/><QuickAction icon={<UserMinus/>} title="Geri takip etmeyenler" detail={`${notFollowing.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('not-following')}/><QuickAction icon={<Heart/>} title="Karşılıklı takip" detail={`${mutual.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('mutual')}/></section></div>
             <div className="privacy-banner"><ShieldCheck size={20}/><div><b>Gizlilik öncelikli tasarım</b><span>Arşivin tarayıcında okunur. Instagram şifreni istemeyiz ve hesabına senin adına giriş yapmayız.</span></div></div>
           </> : <>
-            <div className="section-heading"><div><div className="eyebrow">TAKİP YÖNETİMİ</div><h2>{title}</h2><p>{tab === 'pending' ? 'Gönderdiğin ve henüz yanıtlanmamış takip istekleri.' : tab === 'not-following' ? 'Seni takip etmeyen ve erişilebilir olduğunu kontrol ettiğin hesaplar.' : tab === 'inactive' ? 'Profilini açtığında erişilemediğini gördüğün hesaplar. Bu hesaplar takip etmeyenler sayısından çıkarılır.' : tab === 'mutual' ? 'Birbirinizi takip ettiğiniz hesaplar.' : 'Seni takip eden ancak senin takip etmediğin hesaplar.'}</p></div><button className="text-btn" onClick={() => exportCsv(currentRows, tab)}><ArrowDownToLine size={15}/> CSV dışa aktar</button></div>
+            <div className="section-heading"><div><div className="eyebrow">TAKİP YÖNETİMİ</div><h2>{title}</h2><p>{tab === 'pending' ? 'Gönderdiğin ve henüz yanıtlanmamış takip istekleri.' : tab === 'not-following' ? 'Seni takip etmeyen ve erişilebilir olduğunu kontrol ettiğin hesaplar.' : tab === 'inactive' ? 'Profilini açtığında erişilemediğini gördüğün hesaplar. Bu hesaplar takip etmeyenler sayısından çıkarılır.' : tab === 'archive-extra' ? 'Arşivde bulunan ancak yapıştırdığın güncel takip listesinde yer almayan hesaplar. Bu kayıtlar kesinlikle kapalı hesap anlamına gelmez.' : tab === 'mutual' ? 'Birbirinizi takip ettiğiniz hesaplar.' : 'Seni takip eden ancak senin takip etmediğin hesaplar.'}</p></div><button className="text-btn" onClick={() => exportCsv(currentRows, tab)}><ArrowDownToLine size={15}/> CSV dışa aktar</button></div>
             <section className="panel table-panel"><div className="table-toolbar"><div className="searchbox"><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Kullanıcı adı ara…"/></div><div className="result-count"><span className="filter-symbol">⌕</span> {filteredRows.length.toLocaleString('tr-TR')} sonuç</div></div>
               <div className="table-head"><span>HESAP</span><span>ARŞİV TARİHİ</span><span>İŞLEM</span></div>
               <div className="table-body">{filteredRows.slice(0, 300).map(person => {
@@ -232,7 +256,7 @@ export default function App() {
                 </div>;
               })}{filteredRows.length === 0 && <div className="no-results">Bu listede eşleşen hesap bulunamadı.</div>}{filteredRows.length > 300 && <div className="list-foot">İlk 300 hesap gösteriliyor. Daha dar arama yapabilir veya CSV olarak dışa aktarabilirsin.</div>}</div>
             </section>
-            {(tab === 'pending' || tab === 'not-following' || tab === 'inactive') && <div className="action-note"><CircleHelp size={17}/><span><b>Manuel kontrol:</b> Profili Instagram'da aç. Erişilemiyorsa “Erişilemiyor” ile ayrı listeye al; bu işaret hesabın kesin kapalı olduğunu kanıtlamaz. Takipten çıkarma işlemini Instagram'da kendin yap.</span></div>}
+            {(tab === 'pending' || tab === 'not-following' || tab === 'inactive' || tab === 'archive-extra') && <div className="action-note"><CircleHelp size={17}/><span><b>Manuel kontrol:</b> Profili Instagram'da aç. Erişilemiyorsa “Erişilemiyor” ile ayrı listeye al; bu işaret hesabın kesin kapalı olduğunu kanıtlamaz. Takipten çıkarma işlemini Instagram'da kendin yap.</span></div>}
           </>}
           <footer className="page-footer"><span>Social Sweep · Açık kaynaklı, topluluk odaklı proje</span><button onClick={clearProgress}>İşlem işaretlerini temizle</button></footer>
         </>}
