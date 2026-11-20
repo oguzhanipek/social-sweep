@@ -38,7 +38,7 @@ function personFromPending(item: any): Person | null {
   return username ? { username, timestamp: item?.timestamp || item?.string_list_data?.[0]?.timestamp, href: `https://www.instagram.com/${username}/` } : null;
 }
 function parseUsernames(text: string): string[] {
-  return [...new Set(text.split(/[\s,;]+/).map(token => cleanUsername(token)).filter(Boolean))];
+  return [...new Set(text.split(/[\s,;]+/).map(token => cleanUsername(token)).filter(username => /^[a-z0-9._]{1,30}$/.test(username)))];
 }
 function uniquePeople(list: Array<Person | null>): Person[] {
   const map = new Map<string, Person>();
