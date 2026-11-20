@@ -87,6 +87,7 @@ function formatDate(timestamp?: number) {
 
 export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
+  const compareFileRef = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<Dataset | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [search, setSearch] = useState('');
@@ -167,6 +168,32 @@ export default function App() {
     const next = { ...progress, [kind]: (progress[kind] || []).filter(x => x !== username) };
     setProgress(next); localStorage.setItem(PROGRESS_KEY, JSON.stringify(next));
   }
+  async function importComparisonZip(file?: File) {
+    if (!file) return;
+    setBusy(true);
+    setNotice('Güncel Instagram ZIP dosyası taranıyor…');
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const path = Object.keys(zip.files).find(p => p.toLowerCase().endsWith('following.json'));
+      if (!path) throw new Error('Yeni ZIP içinde following.json bulunamadı. Instagram indirme ayarlarında takipçiler ve takip edilenler verisini JSON olarak seç.');
+      const raw = JSON.parse(await zip.file(path)!.async('string'));
+      const entries = Array.isArray(raw?.relationships_following) ? raw.relationships_following : [];
+      const people = uniquePeople(entries.map(personFromFollowing));
+      if (!people.length) throw new Error('Yeni ZIP içindeki takip listesi okunamadı veya boş.');
+      const usernames = people.map(person => person.username);
+      setCurrentFollowing(usernames);
+      setCurrentFollowingText(usernames.join('\\n'));
+      localStorage.setItem(CURRENT_FOLLOWING_KEY, usernames.join('\\n'));
+      setTab('archive-extra');
+      const archiveCount = (data?.following || []).filter(person => !new Set(usernames).has(person.username)).length;
+      setNotice(`Güncel ZIP karşılaştırma listesi yüklendi: ${people.length.toLocaleString('tr-TR')} hesap. Arşivde olup yeni listede bulunmayan ${archiveCount.toLocaleString('tr-TR')} hesap incelenebilir.`);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : 'Güncel ZIP dosyası okunamadı.');
+    } finally {
+      setBusy(false);
+      if (compareFileRef.current) compareFileRef.current.value = '';
+    }
+  }
   function saveCurrentFollowing() {
     const parsed = parseUsernames(currentFollowingText);
     if (!parsed.length) { setNotice('Karşılaştırma için güncel takip listesine kullanıcı adlarını ekle.'); return; }
@@ -229,6 +256,7 @@ export default function App() {
               </div>
               <p className="audit-footnote">Bu karşılaştırma yalnızca sayıları gösterir. Farkın nedeni hakkında tek başına kesin sonuç vermez; arşiv tarihi, dosya kapsamı ve Instagram'daki güncel durum ayrıca incelenmelidir.</p>
               <div className="archive-compare-input" style={{marginTop:18,paddingTop:16,borderTop:'1px solid var(--border, #302a42)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:12}}><button className="primary-btn" onClick={() => compareFileRef.current?.click()} disabled={busy}><FileArchive size={16}/> {busy ? 'ZIP okunuyor…' : 'Güncel Instagram ZIP dosyasını yükle'}</button><input ref={compareFileRef} type="file" accept=".zip,application/zip" hidden onChange={e => importComparisonZip(e.target.files?.[0])}/><span className="audit-footnote">İlk yüklediğin arşiv korunur; yeni ZIP yalnızca karşılaştırma listesi olarak okunur.</span></div>
                 <label htmlFor="current-following-list" style={{display:'block',marginBottom:8,fontSize:13,color:'var(--muted, #a99bc9)'}}>Instagram'daki güncel takip edilen hesapların kullanıcı adları</label>
                 <textarea id="current-following-list" value={currentFollowingText} onChange={e => setCurrentFollowingText(e.target.value)} placeholder={'Her satıra bir kullanıcı adı yapıştır. Örnek:\noguzhan_ornek\nhttps://www.instagram.com/ornek/\n@baska_hesap'} rows={5} style={{width:'100%',resize:'vertical',background:'var(--surface, #100e18)',color:'inherit',border:'1px solid var(--border, #39314d)',borderRadius:10,padding:12,font:'inherit',fontSize:13,boxSizing:'border-box'}} />
                 <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',marginTop:10}}><button className="primary-btn" onClick={saveCurrentFollowing}><Check size={16}/> Listeyi kaydet ve karşılaştır</button><span className="audit-footnote">{currentFollowing.length ? `${currentFollowing.length.toLocaleString('tr-TR')} kullanıcı adı kayıtlı · ${archiveOnly.length.toLocaleString('tr-TR')} arşiv fazlası` : 'Kullanıcı adları yalnızca bu tarayıcıda saklanır.'}</span></div>
