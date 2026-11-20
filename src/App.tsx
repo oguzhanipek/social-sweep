@@ -198,11 +198,11 @@ export default function App() {
               <div className="panel-heading"><div><h3><ShieldCheck size={17}/> Arşiv veri denetimi</h3><p>ZIP içindeki takip kayıtlarının teknik kontrolü</p></div><span className="panel-tag">YEREL RAPOR</span></div>
               <div className="audit-grid">
                 <div><small>Ham takip kaydı</small><b>{(data.audit?.rawFollowingCount ?? data.following.length).toLocaleString('tr-TR')}</b></div>
-                <div><small>Benzersiz hesap</small><b>{data.following.length.toLocaleString('tr-TR')}</b></div>
+                <div><small>Geçerli kayıt</small><b>{(data.audit?.validFollowingCount ?? data.following.length).toLocaleString('tr-TR')}</b></div>
                 <div><small>Tekrarlanan kayıt</small><b>{(data.audit?.duplicateFollowingCount ?? 0).toLocaleString('tr-TR')}</b></div>
                 <div><small>Okunamayan kayıt</small><b>{(data.audit?.invalidFollowingCount ?? 0).toLocaleString('tr-TR')}</b></div>
               </div>
-              <div className="audit-source"><span>Okunan dosya</span><code>{data.audit?.followingPath || 'Arşiv denetimi önceki sürümde yapılmamış'}</code><span>{data.audit?.followingFileCandidates ?? '—'} adet following.json bulundu</span></div>
+              <div className="audit-source"><span>Okunan dosya</span><code>{data.audit?.followingPath || 'Arşiv denetimi önceki sürümde yapılmamış'}</code><span>{data.audit?.followingFileCandidates ?? '—'} adet following.json bulundu</span><span>Takip kayıtlarının tarih aralığı: {data.audit?.oldestFollowingAt ? formatDate(data.audit.oldestFollowingAt) : '—'} – {data.audit?.newestFollowingAt ? formatDate(data.audit.newestFollowingAt) : '—'}</span></div>
               <div className="audit-compare">
                 <label htmlFor="live-following-count">Instagram profilindeki güncel “takip” sayısı</label>
                 <input id="live-following-count" inputMode="numeric" type="number" min="0" value={liveFollowingCount} onChange={e => setLiveFollowingCount(e.target.value)} placeholder="Örn. 285"/>
