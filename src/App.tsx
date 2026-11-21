@@ -89,6 +89,7 @@ function formatDate(timestamp?: number) {
 export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const compareFileRef = useRef<HTMLInputElement>(null);
+  const pendingJsonRef = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<Dataset | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [search, setSearch] = useState('');
@@ -183,6 +184,30 @@ export default function App() {
     } catch (e) { setNotice(e instanceof Error ? e.message : 'ZIP dosyası okunamadı.'); }
     finally { setBusy(false); if (fileRef.current) fileRef.current.value = ''; }
   }
+  async function importPendingJson(file?: File) {
+    if (!file) return;
+    setBusy(true);
+    setNotice('Bekleyen takip istekleri JSON dosyası okunuyor…');
+    try {
+      const raw = JSON.parse(await file.text());
+      const candidates = Array.isArray(raw) ? raw : (raw?.relationships_follow_requests_sent || raw?.relationships_follow_requests || raw?.pending_follow_requests || []);
+      if (!Array.isArray(candidates)) throw new Error('JSON dosyasında bekleyen gönderilmiş takip isteği listesi bulunamadı.');
+      const pending = uniquePeople(candidates.map(personFromPending));
+      if (!pending.length) throw new Error('JSON dosyası okundu ancak kullanıcı adı içeren bekleyen istek bulunamadı. Instagram dışa aktarımındaki pending_follow_requests.json dosyasını seçtiğinden emin ol.');
+      const base = data || { followers: [], following: [], pending: [], importedAt: new Date().toISOString(), fileName: 'Canlı Instagram aktarımı' };
+      const updated: Dataset = { ...base, pending, importedAt: new Date().toISOString(), fileName: base.fileName + ' · bekleyen istekler: ' + file.name };
+      setData(updated);
+      await saveDatasetLocally(updated);
+      setTab('pending');
+      setSearch('');
+      setNotice('Bekleyen istek JSON dosyası yüklendi: ' + pending.length.toLocaleString('tr-TR') + ' benzersiz hesap. Eski ZIP arşivindeki istek sayısının yerine bu liste kullanılıyor.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Bekleyen istek JSON dosyası okunamadı.');
+    } finally {
+      setBusy(false);
+      if (pendingJsonRef.current) pendingJsonRef.current.value = '';
+    }
+  }
   function mark(kind: 'pending' | 'unfollow' | 'inactive', username: string) {
     const next = { ...progress, [kind]: [...new Set([...(progress[kind] || []), username])] };
     setProgress(next); localStorage.setItem(PROGRESS_KEY, JSON.stringify(next));
@@ -257,7 +282,7 @@ export default function App() {
     <main className="main-content">
       <header className="topbar"><div className="crumb">Workspace <span>/</span> Instagram analytics</div><div className="top-actions"><span className="local-pill"><span/> Yerel analiz</span><button className="icon-button" title="Veri gizliliği" onClick={() => setNotice('ZIP dosyan yalnızca tarayıcında işlenir. Herhangi bir sunucuya yüklenmez.')}><ShieldCheck size={18}/></button></div></header>
       <div className="page-wrap">
-        <section className="hero"><div><div className="eyebrow"><Sparkles size={14}/> SOSYAL HESAP ANALİZİ</div><h1>Takip ilişkilerini<br/><span>kontrol altına al.</span></h1><p>Instagram verilerini içe aktar, takip durumunu analiz et ve hesabını kendi kontrolünle düzenle.</p><div className="hero-actions"><button className="primary-btn" onClick={() => fileRef.current?.click()} disabled={busy}><FileArchive size={17}/>{busy ? 'Dosya analiz ediliyor…' : data ? 'Yeni ZIP yükle' : 'Instagram ZIP dosyasını yükle'}</button>{data && <span className="imported"><CheckCircleIcon/> Veri yüklendi</span>}</div><input ref={fileRef} type="file" accept=".zip,application/zip" hidden onChange={e => importZip(e.target.files?.[0])}/></div><div className="hero-art"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="art-center"><Instagram size={38}/></div><div className="float-card card-a"><UserPlus size={15}/><span>Takip istekleri</span></div><div className="float-card card-b"><Users size={15}/><span>Takip analizi</span></div><div className="float-dot"/></div></section>
+        <section className="hero"><div><div className="eyebrow"><Sparkles size={14}/> SOSYAL HESAP ANALİZİ</div><h1>Takip ilişkilerini<br/><span>kontrol altına al.</span></h1><p>Instagram verilerini içe aktar, takip durumunu analiz et ve hesabını kendi kontrolünle düzenle.</p><div className="hero-actions"><button className="primary-btn" onClick={() => fileRef.current?.click()} disabled={busy}><FileArchive size={17}/>{busy ? 'Dosya analiz ediliyor…' : data ? 'Yeni ZIP yükle' : 'Instagram ZIP dosyasını yükle'}</button>{data && <span className="imported"><CheckCircleIcon/> Veri yüklendi</span>}<button className="secondary-btn" onClick={() => pendingJsonRef.current?.click()} disabled={busy}><UserPlus size={16}/> Bekleyen istek JSON yükle</button><input ref={pendingJsonRef} type="file" accept=".json,application/json" hidden onChange={e => importPendingJson(e.target.files?.[0])}/></div><input ref={fileRef} type="file" accept=".zip,application/zip" hidden onChange={e => importZip(e.target.files?.[0])}/></div><div className="hero-art"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="art-center"><Instagram size={38}/></div><div className="float-card card-a"><UserPlus size={15}/><span>Takip istekleri</span></div><div className="float-card card-b"><Users size={15}/><span>Takip analizi</span></div><div className="float-dot"/></div></section>
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')}><X size={16}/></button></div>}
         {!data ? <section className="empty-state"><div className="empty-icon"><FileArchive size={26}/></div><h2>{restoring ? 'Kayıtlı arşiv kontrol ediliyor…' : 'Henüz bir Instagram arşivi yüklenmedi'}</h2><p>{restoring ? 'Bu tarayıcıda daha önce içe aktardığın veriler aranıyor.' : 'Instagram arşivini seç. Analiz tamamen bu tarayıcıda yapılır; dosyan hiçbir yere gönderilmez.'}</p>{!restoring && <button className="secondary-btn" onClick={() => fileRef.current?.click()}>Dosya seç <ArrowUpRight size={16}/></button>}<div className="howto"><b>İpucu</b><span>Instagram Hesaplar Merkezi → Bilgilerin ve izinlerin → Bilgilerini indir veya aktar → Takipçiler ve takip edilenler → JSON</span></div></section> : <>
           {tab === 'overview' ? <>
