@@ -5,7 +5,7 @@ type Props = { rows: Person[]; completed: string[]; onComplete: (username: strin
 const TIMER_KEY = 'social-sweep-pending-next-at-v1';
 const BATCH_KEY = 'social-sweep-pending-batch-count-v1';
 const BATCH_SIZE = 100;
-const BETWEEN_ITEMS_SECONDS = 60;
+const BETWEEN_ITEMS_SECONDS = 10;
 const BATCH_BREAK_SECONDS = 5 * 60;
 
 export default function PendingQueue({ rows, completed, onComplete }: Props) {
@@ -78,7 +78,7 @@ export default function PendingQueue({ rows, completed, onComplete }: Props) {
 
   return <section className="panel pending-queue">
     <div className="pending-queue-head">
-      <div><span className="eyebrow">KONTROLLÜ İŞLEM SIRASI</span><h3>Bekleyen istekleri sırayla temizle</h3><p>En yeni gönderilmiş istekten eskiye doğru ilerler. Her iptali sen onaylarsın; 1 dakika aralıklarla 100 hesaplık gruplar hâlinde çalışır.</p></div>
+      <div><span className="eyebrow">KONTROLLÜ İŞLEM SIRASI</span><h3>Bekleyen istekleri sırayla temizle</h3><p>En yeni gönderilmiş istekten eskiye doğru ilerler. Her iptali sen onaylarsın; hesaplar arasında 10 saniye bekler ve her 100 hesapta 5 dakika mola verir.</p></div>
       <span className="queue-count">{remaining.length.toLocaleString('tr-TR')} kaldı</span>
     </div>
     <div className="queue-progress"><span style={{width: `${rows.length ? (completed.length / rows.length) * 100 : 0}%`}} /></div>
@@ -86,7 +86,7 @@ export default function PendingQueue({ rows, completed, onComplete }: Props) {
     {current ? <>
       <div className="queue-current"><div className="queue-avatar">{current.username.slice(0,1).toUpperCase()}</div><div><small>SIRADAKİ HESAP</small><b>@{current.username}</b><a href={`https://www.instagram.com/${current.username}/`} target="_blank" rel="noreferrer">Profil bağlantısını görüntüle</a></div></div>
       <div className="queue-controls">
-        <div className="queue-batch-info"><small>BU GRUPTA İŞLENEN</small><b>{batchCount} / {BATCH_SIZE}</b><small>Her hesap: 1 dakika · 100 hesap sonrası: 5 dakika mola</small></div>
+        <div className="queue-batch-info"><small>BU GRUPTA İŞLENEN</small><b>{batchCount} / {BATCH_SIZE}</b><small>Her hesap: 10 saniye · 100 hesap sonrası: 5 dakika mola</small></div>
         {!sessionActive ? <button className="queue-primary" onClick={startSession}>Instagram sekmesini aç ve başlat</button> : <button className="queue-secondary" onClick={() => setSessionActive(false)}>Oturumu duraklat</button>}
         <button className="queue-open" onClick={openCurrent} disabled={!sessionActive || !ready}>Bu profili yeniden aç</button>
         <button className="queue-done" onClick={markWithdrawn} disabled={!sessionActive || !ready}>İsteği geri çektim</button>
