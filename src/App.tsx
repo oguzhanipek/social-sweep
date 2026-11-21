@@ -5,7 +5,7 @@ import PendingQueue from './PendingQueue';
 import { Activity, ArrowDownToLine, ArrowUpRight, Check, CircleHelp, FileArchive, Heart, Instagram, LockKeyhole, RefreshCw, Search, ShieldCheck, Sparkles, Users, UserMinus, UserPlus, X } from 'lucide-react';
 
 type Person = { username: string; timestamp?: number; href?: string };
-type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string; audit?: { followingPath: string; followingFileCandidates: number; rawFollowingCount: number; validFollowingCount: number; duplicateFollowingCount: number; invalidFollowingCount: number; oldestFollowingAt?: number; newestFollowingAt?: number } };
+type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string; liveSource?: boolean; audit?: { followingPath: string; followingFileCandidates: number; rawFollowingCount: number; validFollowingCount: number; duplicateFollowingCount: number; invalidFollowingCount: number; oldestFollowingAt?: number; newestFollowingAt?: number } };
 type Tab = 'overview' | 'pending' | 'not-following' | 'inactive' | 'mutual' | 'followers-only' | 'archive-extra';
 const PROGRESS_KEY = 'social-sweep-progress-v1';
 const CURRENT_FOLLOWING_KEY = 'social-sweep-current-following-v1';
@@ -100,6 +100,25 @@ export default function App() {
   const [currentFollowingText, setCurrentFollowingText] = useState(() => localStorage.getItem(CURRENT_FOLLOWING_KEY) || '');
   const [currentFollowing, setCurrentFollowing] = useState<string[]>(() => parseUsernames(localStorage.getItem(CURRENT_FOLLOWING_KEY) || ''));
 
+  useEffect(() => {
+    const receiveLiveData = (event: MessageEvent) => {
+      const payload = event.data;
+      if (!payload || payload.source !== 'social-sweep-extension' || payload.type !== 'LIVE_LIST' || !['followers', 'following'].includes(payload.listType) || !Array.isArray(payload.usernames)) return;
+      const incoming = uniquePeople(payload.usernames.map((username: unknown) => { const clean = cleanUsername(username); return clean ? { username: clean, href: 'https://www.instagram.com/' + clean + '/' } : null; }));
+      if (!incoming.length) { setNotice('Aktarılacak görünür hesap bulunamadı. Instagram listesini açıp biraz aşağı kaydırdıktan sonra yeniden dene.'); return; }
+      setData(previous => {
+        const base: Dataset = previous || { followers: [], following: [], pending: [], importedAt: new Date().toISOString(), fileName: 'Chrome eklentisi · canlı aktarım' };
+        const key = payload.listType as 'followers' | 'following';
+        const merged = uniquePeople([...(base[key] || []), ...incoming]);
+        const next = { ...base, [key]: merged, liveSource: true, importedAt: new Date().toISOString() };
+        void saveDatasetLocally(next).catch(() => {});
+        return next;
+      });
+      setNotice((payload.listType === 'followers' ? 'Takipçi' : 'Takip edilen') + ' listesinden ' + incoming.length.toLocaleString('tr-TR') + ' görünür hesap aktarıldı. Instagram listesinde aşağı kaydırıp aktarımı tekrarlayarak listeyi tamamlayabilirsin.');
+    };
+    window.addEventListener('message', receiveLiveData);
+    return () => window.removeEventListener('message', receiveLiveData);
+  }, []);
   useEffect(() => {
     let active = true;
     loadDatasetLocally().then(saved => {
@@ -239,9 +258,10 @@ export default function App() {
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')}><X size={16}/></button></div>}
         {!data ? <section className="empty-state"><div className="empty-icon"><FileArchive size={26}/></div><h2>{restoring ? 'Kayıtlı arşiv kontrol ediliyor…' : 'Henüz bir Instagram arşivi yüklenmedi'}</h2><p>{restoring ? 'Bu tarayıcıda daha önce içe aktardığın veriler aranıyor.' : 'Instagram arşivini seç. Analiz tamamen bu tarayıcıda yapılır; dosyan hiçbir yere gönderilmez.'}</p>{!restoring && <button className="secondary-btn" onClick={() => fileRef.current?.click()}>Dosya seç <ArrowUpRight size={16}/></button>}<div className="howto"><b>İpucu</b><span>Instagram Hesaplar Merkezi → Bilgilerin ve izinlerin → Bilgilerini indir veya aktar → Takipçiler ve takip edilenler → JSON</span></div></section> : <>
           {tab === 'overview' ? <>
-            <div className="section-heading"><div><div className="eyebrow">HESAP ÖZETİ</div><h2>Genel Bakış</h2><p>Yüklenen arşivdeki takip ilişkilerinin özeti.</p></div><button className="text-btn" onClick={() => setNotice(`Son içe aktarma: ${new Date(data.importedAt).toLocaleString('tr-TR')} · ${data.fileName}`)}><RefreshCw size={15}/> İçe aktarma bilgisi</button></div>
+            <div className="section-heading"><div><div className="eyebrow">HESAP ÖZETİ</div><h2>Genel Bakış</h2><p>{data.liveSource ? "Chrome eklentisiyle Instagram listesinden alınan hesaplar ve yüklediğin arşiv." : "Yüklenen arşivdeki takip ilişkilerinin özeti."}</p></div><button className="text-btn" onClick={() => setNotice(`Son içe aktarma: ${new Date(data.importedAt).toLocaleString('tr-TR')} · ${data.fileName}`)}><RefreshCw size={15}/> İçe aktarma bilgisi</button></div>
             <div className="stats-grid"><Stat icon={<Users/>} label="Takipçi" value={data.followers.length}/><Stat icon={<UserPlus/>} label="Takip edilen" value={data.following.length}/><Stat icon={<UserMinus/>} label="Seni takip etmeyen" value={notFollowing.length} accent/><Stat icon={<Activity/>} label="Bekleyen istek" value={data.pending.length}/></div>
             <section className="panel audit-panel">
+              {data.liveSource && <div className="audit-footnote" style={{marginBottom:14}}>Chrome canlı aktarımı kullanılıyor. Sayılar yalnızca eklentiyle aktardığın görünür hesapları içerir. Tüm listeyi toplamak için Instagram’da ilgili listeyi aşağı kaydırıp eklentiyi her seferinde yeniden çalıştır; tamamlanmadan sonuçları kesin kabul etme.</div>}
               <div className="panel-heading"><div><h3><ShieldCheck size={17}/> Arşiv veri denetimi</h3><p>ZIP içindeki takip kayıtlarının teknik kontrolü</p></div><span className="panel-tag">YEREL RAPOR</span></div>
               <div className="audit-grid">
                 <div><small>Ham takip kaydı</small><b>{(data.audit?.rawFollowingCount ?? data.following.length).toLocaleString('tr-TR')}</b></div>
