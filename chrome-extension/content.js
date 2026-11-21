@@ -4,7 +4,18 @@
 
   const norm = value => (value || "").replace(/\\s+/g, " ").trim().toLocaleLowerCase("tr-TR");
   const path = location.pathname.toLowerCase();
-  const listType = path.includes("/followers") ? "followers" : path.includes("/following") ? "following" : "";
+  const dialogs = [...document.querySelectorAll('[role="dialog"]')];
+  const dialog = dialogs.find(node => {
+    const text = norm(node.innerText);
+    return text.includes("takip ettikleri") || text.includes("following") || text.includes("takipçiler") || text.includes("followers");
+  });
+  const dialogText = dialog ? norm(dialog.innerText) : "";
+  let listType = path.includes("/followers") ? "followers" : path.includes("/following") ? "following" : "";
+  if (!listType && dialog) {
+    if (dialogText.includes("takip ettikleri") || dialogText.includes("following")) listType = "following";
+    else if (dialogText.includes("takipçiler") || dialogText.includes("followers")) listType = "followers";
+  }
+
   const panel = document.createElement("div");
   panel.id = ID;
   panel.style.cssText = "position:fixed;z-index:2147483647;right:18px;bottom:18px;width:330px;padding:16px;border-radius:12px;background:#171421;color:#fff;border:1px solid #8b6cff;box-shadow:0 12px 40px #0008;font:13px/1.5 Arial,sans-serif";
@@ -24,10 +35,11 @@
   document.body.append(panel);
 
   if (listType) {
-    message.textContent = (listType === "followers" ? "Takipçi" : "Takip edilen") + " listesi algılandı. Instagram listesini aşağı kaydırdıkça yeni görünen hesapları tekrar aktar.";
+    const root = dialog || document;
+    message.textContent = (listType === "followers" ? "Takipçiler" : "Takip Ettikleri") + " listesi algılandı. Listeyi aşağı kaydırdıkça yeni görünen hesapları tekrar aktar.";
     collect.onclick = () => {
       const reserved = new Set(["accounts", "about", "explore", "direct", "p", "reel", "reels", "stories", "developer", "legal", "privacy", "terms", "emails", "challenge", "nametag"]);
-      const usernames = [...new Set([...document.querySelectorAll('a[href]')].map(anchor => {
+      const usernames = [...new Set([...root.querySelectorAll('a[href]')].map(anchor => {
         try {
           const url = new URL(anchor.href, location.origin);
           if (url.hostname !== "www.instagram.com") return "";
@@ -37,7 +49,7 @@
           return /^[a-z0-9._]{1,30}$/.test(username) && !reserved.has(username) ? username : "";
         } catch { return ""; }
       }).filter(Boolean))];
-      if (!usernames.length) { message.textContent = "Görünen hesap bağlantısı bulunamadı. Liste penceresini açıp tekrar dene."; return; }
+      if (!usernames.length) { message.textContent = "Bu pencerede görünür hesap bağlantısı bulunamadı. Biraz kaydırıp tekrar dene."; return; }
       chrome.runtime.sendMessage({
         type: "SOCIAL_SWEEP_FORWARD",
         payload: { source: "social-sweep-extension", type: "LIVE_LIST", listType, usernames }
@@ -52,6 +64,7 @@
     const labels = [...document.querySelectorAll("button,[role='button']")].filter(el =>
       ["istek gönderildi", "request sent", "requested"].includes(norm(el.innerText || el.getAttribute("aria-label")))
     );
+    collect.style.display = "none";
     if (labels.length === 1) {
       labels[0].style.outline = "3px solid #a78bfa";
       labels[0].style.outlineOffset = "3px";
@@ -59,7 +72,7 @@
     } else if (labels.length > 1) {
       message.textContent = "Birden fazla istek düğmesi bulundu. Güvenlik için otomatik seçim yapılmadı.";
     } else {
-      message.textContent = "Takipçi/takip edilen listesi sayfasında değilsin. Profil kontrolü için bekleyen istek düğmesi algılanmadı.";
+      message.textContent = "Takipçi veya takip edilenler listesi algılanamadı. Instagram'da ilgili liste penceresini açıp eklentiyi tekrar çalıştır.";
     }
   }
 })();
