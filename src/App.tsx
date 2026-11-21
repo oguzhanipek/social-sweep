@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import JSZip from 'jszip';
+import PendingQueue from './PendingQueue';
 import { Activity, ArrowDownToLine, ArrowUpRight, Check, CircleHelp, FileArchive, Heart, Instagram, LockKeyhole, RefreshCw, Search, ShieldCheck, Sparkles, Users, UserMinus, UserPlus, X } from 'lucide-react';
 
 type Person = { username: string; timestamp?: number; href?: string };
@@ -267,6 +268,7 @@ export default function App() {
             <div className="privacy-banner"><ShieldCheck size={20}/><div><b>Gizlilik öncelikli tasarım</b><span>Arşivin tarayıcında okunur. Instagram şifreni istemeyiz ve hesabına senin adına giriş yapmayız.</span></div></div>
           </> : <>
             <div className="section-heading"><div><div className="eyebrow">TAKİP YÖNETİMİ</div><h2>{title}</h2><p>{tab === 'pending' ? 'Gönderdiğin ve henüz yanıtlanmamış takip istekleri.' : tab === 'not-following' ? 'Seni takip etmeyen ve erişilebilir olduğunu kontrol ettiğin hesaplar.' : tab === 'inactive' ? 'Profilini açtığında erişilemediğini gördüğün hesaplar. Bu hesaplar takip etmeyenler sayısından çıkarılır.' : tab === 'archive-extra' ? 'Arşivde bulunan ancak yapıştırdığın güncel takip listesinde yer almayan hesaplar. Bu kayıtlar kesinlikle kapalı hesap anlamına gelmez.' : tab === 'mutual' ? 'Birbirinizi takip ettiğiniz hesaplar.' : 'Seni takip eden ancak senin takip etmediğin hesaplar.'}</p></div><button className="text-btn" onClick={() => exportCsv(currentRows, tab)}><ArrowDownToLine size={15}/> CSV dışa aktar</button></div>
+            {tab === 'pending' && <PendingQueue rows={data.pending} completed={progress.pending || []} onComplete={username => mark('pending', username)} />}
             <section className="panel table-panel"><div className="table-toolbar"><div className="searchbox"><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Kullanıcı adı ara…"/></div><div className="result-count"><span className="filter-symbol">⌕</span> {filteredRows.length.toLocaleString('tr-TR')} sonuç</div></div>
               <div className="table-head"><span>HESAP</span><span>ARŞİV TARİHİ</span><span>İŞLEM</span></div>
               <div className="table-body">{filteredRows.slice(0, 300).map(person => {
