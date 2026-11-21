@@ -48,3 +48,7 @@
 .queue-finished{padding:22px;text-align:center;color:#83d9a8}
 .queue-safety{padding-top:10px;border-top:1px solid #302d40;color:#777389}
 @media(max-width:650px){.pending-queue-head{display:block}.queue-count{display:inline-block;margin-top:10px}.queue-controls>*{width:100%}.queue-controls button{padding:12px}}
+
+.queue-batch-info{display:grid;gap:4px;padding:8px 11px;background:#201d2d;border:1px solid #39334c;border-radius:8px;color:#aaa3bc;font-size:10px}
+.queue-batch-info b{font-size:15px;color:#d7caff}
+.queue-batch-info small:last-child{font-size:9px}
