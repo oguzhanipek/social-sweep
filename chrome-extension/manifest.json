@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Social Sweep - Instagram Helper",
+  "version": "0.1.0",
+  "description": "Social Sweep için Instagram profil durumunu algılayan yardımcı uzantı.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://www.instagram.com/*"],
+  "action": {
+    "default_title": "Social Sweep: İstek durumunu kontrol et"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
