@@ -5,7 +5,7 @@ import PendingQueue from './PendingQueue';
 import { Activity, ArrowDownToLine, ArrowUpRight, Check, CircleHelp, FileArchive, Heart, Instagram, LockKeyhole, RefreshCw, Search, ShieldCheck, Sparkles, Users, UserMinus, UserPlus, X } from 'lucide-react';
 
 type Person = { username: string; timestamp?: number; href?: string };
-type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string; liveSource?: boolean; audit?: { followingPath: string; followingFileCandidates: number; rawFollowingCount: number; validFollowingCount: number; duplicateFollowingCount: number; invalidFollowingCount: number; oldestFollowingAt?: number; newestFollowingAt?: number } };
+type Dataset = { followers: Person[]; following: Person[]; pending: Person[]; importedAt: string; fileName: string; liveSource?: boolean; liveFollowers?: Person[]; liveFollowing?: Person[]; audit?: { followingPath: string; followingFileCandidates: number; rawFollowingCount: number; validFollowingCount: number; duplicateFollowingCount: number; invalidFollowingCount: number; oldestFollowingAt?: number; newestFollowingAt?: number } };
 type Tab = 'overview' | 'pending' | 'not-following' | 'inactive' | 'mutual' | 'followers-only' | 'archive-extra';
 const PROGRESS_KEY = 'social-sweep-progress-v1';
 const CURRENT_FOLLOWING_KEY = 'social-sweep-current-following-v1';
@@ -109,8 +109,9 @@ export default function App() {
       setData(previous => {
         const base: Dataset = previous || { followers: [], following: [], pending: [], importedAt: new Date().toISOString(), fileName: 'Chrome eklentisi · canlı aktarım' };
         const key = payload.listType as 'followers' | 'following';
-        const merged = uniquePeople([...(base[key] || []), ...incoming]);
-        const next = { ...base, [key]: merged, liveSource: true, importedAt: new Date().toISOString() };
+        const liveKey = key === 'followers' ? 'liveFollowers' : 'liveFollowing';
+        const merged = uniquePeople([...(base[liveKey] || []), ...incoming]);
+        const next = { ...base, [liveKey]: merged, liveSource: true, importedAt: new Date().toISOString() };
         void saveDatasetLocally(next).catch(() => {});
         return next;
       });
@@ -130,15 +131,17 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
-  const followingSet = useMemo(() => new Set((data?.following || []).map(x => x.username)), [data]);
+  const analysisFollowing = data?.liveFollowing || data?.following || [];
+  const analysisFollowers = data?.liveFollowers || data?.followers || [];
+  const followingSet = useMemo(() => new Set(analysisFollowing.map(x => x.username)), [analysisFollowing]);
   const currentFollowingSet = useMemo(() => new Set(currentFollowing), [currentFollowing]);
   const archiveOnly = useMemo(() => currentFollowingSet.size ? (data?.following || []).filter(x => !currentFollowingSet.has(x.username)) : [], [data, currentFollowingSet]);
-  const followerSet = useMemo(() => new Set((data?.followers || []).map(x => x.username)), [data]);
+  const followerSet = useMemo(() => new Set(analysisFollowers.map(x => x.username)), [analysisFollowers]);
   const inactiveSet = new Set(progress.inactive || []);
-  const inactiveAccounts = useMemo(() => (data?.following || []).filter(x => inactiveSet.has(x.username)), [data, progress.inactive]);
-  const notFollowing = useMemo(() => (data?.following || []).filter(x => !followerSet.has(x.username) && !inactiveSet.has(x.username)), [data, followerSet, progress.inactive]);
-  const mutual = useMemo(() => (data?.following || []).filter(x => followerSet.has(x.username)), [data, followerSet]);
-  const followersOnly = useMemo(() => (data?.followers || []).filter(x => !followingSet.has(x.username)), [data, followingSet]);
+  const inactiveAccounts = useMemo(() => analysisFollowing.filter(x => inactiveSet.has(x.username)), [analysisFollowing, progress.inactive]);
+  const notFollowing = useMemo(() => analysisFollowing.filter(x => !followerSet.has(x.username) && !inactiveSet.has(x.username)), [analysisFollowing, followerSet, progress.inactive]);
+  const mutual = useMemo(() => analysisFollowing.filter(x => followerSet.has(x.username)), [analysisFollowing, followerSet]);
+  const followersOnly = useMemo(() => analysisFollowers.filter(x => !followingSet.has(x.username)), [analysisFollowers, followingSet]);
   const donePending = new Set(progress.pending || []);
   const doneUnfollow = new Set(progress.unfollow || []);
 
@@ -259,7 +262,7 @@ export default function App() {
         {!data ? <section className="empty-state"><div className="empty-icon"><FileArchive size={26}/></div><h2>{restoring ? 'Kayıtlı arşiv kontrol ediliyor…' : 'Henüz bir Instagram arşivi yüklenmedi'}</h2><p>{restoring ? 'Bu tarayıcıda daha önce içe aktardığın veriler aranıyor.' : 'Instagram arşivini seç. Analiz tamamen bu tarayıcıda yapılır; dosyan hiçbir yere gönderilmez.'}</p>{!restoring && <button className="secondary-btn" onClick={() => fileRef.current?.click()}>Dosya seç <ArrowUpRight size={16}/></button>}<div className="howto"><b>İpucu</b><span>Instagram Hesaplar Merkezi → Bilgilerin ve izinlerin → Bilgilerini indir veya aktar → Takipçiler ve takip edilenler → JSON</span></div></section> : <>
           {tab === 'overview' ? <>
             <div className="section-heading"><div><div className="eyebrow">HESAP ÖZETİ</div><h2>Genel Bakış</h2><p>{data.liveSource ? "Chrome eklentisiyle Instagram listesinden alınan hesaplar ve yüklediğin arşiv." : "Yüklenen arşivdeki takip ilişkilerinin özeti."}</p></div><button className="text-btn" onClick={() => setNotice(`Son içe aktarma: ${new Date(data.importedAt).toLocaleString('tr-TR')} · ${data.fileName}`)}><RefreshCw size={15}/> İçe aktarma bilgisi</button></div>
-            <div className="stats-grid"><Stat icon={<Users/>} label="Takipçi" value={data.followers.length}/><Stat icon={<UserPlus/>} label="Takip edilen" value={data.following.length}/><Stat icon={<UserMinus/>} label="Seni takip etmeyen" value={notFollowing.length} accent/><Stat icon={<Activity/>} label="Bekleyen istek" value={data.pending.length}/></div>
+            <div className="stats-grid"><Stat icon={<Users/>} label="Takipçi" value={analysisFollowers.length}/><Stat icon={<UserPlus/>} label="Takip edilen" value={analysisFollowing.length}/><Stat icon={<UserMinus/>} label="Seni takip etmeyen" value={notFollowing.length} accent/><Stat icon={<Activity/>} label="Bekleyen istek" value={data.pending.length}/></div>
             <section className="panel audit-panel">
               {data.liveSource && <div className="audit-footnote" style={{marginBottom:14}}>Chrome canlı aktarımı kullanılıyor. Sayılar yalnızca eklentiyle aktardığın görünür hesapları içerir. Tüm listeyi toplamak için Instagram’da ilgili listeyi aşağı kaydırıp eklentiyi her seferinde yeniden çalıştır; tamamlanmadan sonuçları kesin kabul etme.</div>}
               <div className="panel-heading"><div><h3><ShieldCheck size={17}/> Arşiv veri denetimi</h3><p>ZIP içindeki takip kayıtlarının teknik kontrolü</p></div><span className="panel-tag">YEREL RAPOR</span></div>
@@ -283,7 +286,7 @@ export default function App() {
                 <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',marginTop:10}}><button className="primary-btn" onClick={saveCurrentFollowing}><Check size={16}/> Listeyi kaydet ve karşılaştır</button><span className="audit-footnote">{currentFollowing.length ? `${currentFollowing.length.toLocaleString('tr-TR')} kullanıcı adı kayıtlı · ${archiveOnly.length.toLocaleString('tr-TR')} arşiv fazlası` : 'Kullanıcı adları yalnızca bu tarayıcıda saklanır.'}</span></div>
               </div>
             </section>
-            <div className="content-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h3>Takip dağılımı</h3><p>Takip ettiğin hesapların durumu</p></div><span className="panel-tag">ÖZET</span></div><div className="distribution"><div className="donut" style={{'--mutual': `${data.following.length ? mutual.length / data.following.length * 100 : 0}%`} as CSSProperties}><div><b>{data.following.length ? Math.round(mutual.length / data.following.length * 100) : 0}%</b><span>karşılıklı</span></div></div><div className="legend"><Legend color="purple" label="Karşılıklı takip" value={mutual.length}/><Legend color="orange" label="Geri takip etmeyen" value={notFollowing.length}/></div></div></section>
+            <div className="content-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h3>Takip dağılımı</h3><p>Takip ettiğin hesapların durumu</p></div><span className="panel-tag">ÖZET</span></div><div className="distribution"><div className="donut" style={{'--mutual': `${analysisFollowing.length ? mutual.length / analysisFollowing.length * 100 : 0}%`} as CSSProperties}><div><b>{analysisFollowing.length ? Math.round(mutual.length / analysisFollowing.length * 100) : 0}%</b><span>karşılıklı</span></div></div><div className="legend"><Legend color="purple" label="Karşılıklı takip" value={mutual.length}/><Legend color="orange" label="Geri takip etmeyen" value={notFollowing.length}/></div></div></section>
               <section className="panel quick-panel"><div className="panel-heading"><div><h3>Hızlı işlemler</h3><p>Analiz listelerine geç</p></div><Sparkles size={18} className="muted-icon"/></div><QuickAction icon={<UserPlus/>} title="Bekleyen istekler" detail={`${data.pending.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('pending')}/><QuickAction icon={<UserMinus/>} title="Geri takip etmeyenler" detail={`${notFollowing.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('not-following')}/><QuickAction icon={<Heart/>} title="Karşılıklı takip" detail={`${mutual.length.toLocaleString('tr-TR')} hesap`} onClick={() => setTab('mutual')}/></section></div>
             <div className="privacy-banner"><ShieldCheck size={20}/><div><b>Gizlilik öncelikli tasarım</b><span>Arşivin tarayıcında okunur. Instagram şifreni istemeyiz ve hesabına senin adına giriş yapmayız.</span></div></div>
           </> : <>
