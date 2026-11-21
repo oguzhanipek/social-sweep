@@ -5,6 +5,7 @@ type Props = { rows: Person[]; completed: string[]; skipped: string[]; onComplet
 const TIMER_KEY = 'social-sweep-pending-next-at-v1';
 const BATCH_KEY = 'social-sweep-pending-batch-count-v1';
 const SESSION_KEY = 'social-sweep-pending-session-v1';
+const BATCH_QUEUE_KEY = 'social-sweep-pending-open-batch-v1';
 const BATCH_SIZE = 100;
 const BETWEEN_ITEMS_SECONDS = 10;
 const BATCH_BREAK_SECONDS = 5 * 60;
@@ -17,7 +18,8 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
   const [now, setNow] = useState(Date.now());
   const [sessionActive, setSessionActive] = useState(false);
   const [resumeAvailable, setResumeAvailable] = useState(() => localStorage.getItem(SESSION_KEY) === '1');
-  const [batchMode, setBatchMode] = useState(false);
+  const [batchMode, setBatchMode] = useState(() => localStorage.getItem(BATCH_QUEUE_KEY) === '1');
+  const [batchUsernames, setBatchUsernames] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(BATCH_QUEUE_KEY + '-users') || '[]'); } catch { return []; } });
   const [batchOpenMessage, setBatchOpenMessage] = useState('');
   const instagramTabRef = useRef<Window | null>(null);
   const lastAutoOpenedRef = useRef<string>('');
@@ -84,8 +86,12 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
   }
 
   function openNextTen() {
-    if (!sessionActive || !ready) return;
+    if (!sessionActive || !ready || batchMode) return;
     const targets = remaining.slice(0, 10);
+    const usernames = targets.map(person => person.username);
+    setBatchUsernames(usernames);
+    localStorage.setItem(BATCH_QUEUE_KEY, '1');
+    localStorage.setItem(BATCH_QUEUE_KEY + '-users', JSON.stringify(usernames));
     let openedCount = 0;
     targets.forEach((person, index) => {
       const tab = window.open(`https://www.instagram.com/${person.username}/`, '_blank');
@@ -93,6 +99,25 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
     });
     setBatchMode(true);
     setBatchOpenMessage(`${targets.length} profil için sekme açma isteği gönderildi. Tarayıcı ${openedCount} sekmeyi onayladı; engellenen açılır pencereler varsa site izinlerinden pop-up izni ver.`);
+  }
+
+  function markBatchWithdrawn() {
+    if (!batchMode || !batchUsernames.length || !ready || !sessionActive) return;
+    const count = batchUsernames.length;
+    batchUsernames.forEach(username => onComplete(username));
+    const total = batchCount + count;
+    const crossedBreak = total >= BATCH_SIZE;
+    const nextBatchCount = total % BATCH_SIZE;
+    setBatchCount(nextBatchCount);
+    localStorage.setItem(BATCH_KEY, String(nextBatchCount));
+    setBatchUsernames([]);
+    setBatchMode(false);
+    localStorage.removeItem(BATCH_QUEUE_KEY);
+    localStorage.removeItem(BATCH_QUEUE_KEY + '-users');
+    setBatchOpenMessage(count + ' hesap tamamlandı olarak kaydedildi.');
+    const next = Date.now() + (crossedBreak ? BATCH_BREAK_SECONDS : BETWEEN_ITEMS_SECONDS) * 1000;
+    localStorage.setItem(TIMER_KEY, String(next));
+    setNextAt(next);
   }
 
   function skipCurrent() {
@@ -126,13 +151,13 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
         <div className="queue-batch-info"><small>BU GRUPTA İŞLENEN</small><b>{batchCount} / {BATCH_SIZE}</b><small>Her hesap: 10 saniye · 100 hesap sonrası: 5 dakika mola</small></div>
         {!sessionActive ? <button className="queue-primary" onClick={startSession} disabled={!ready}>{resumeAvailable ? 'Oturumu sürdür ve sıradaki profili aç' : 'Instagram sekmesini aç ve başlat'}</button> : <button className="queue-secondary" onClick={pauseSession}>Oturumu duraklat</button>}
         <button className="queue-open" onClick={openCurrent} disabled={!sessionActive || !ready || batchMode}>Bu profili yeniden aç</button>
-        <button className="queue-primary" onClick={openNextTen} disabled={!sessionActive || !ready}>Sonraki 10 hesabı sekmelerde aç</button>
-        {batchMode && <button className="queue-secondary" onClick={() => { setBatchMode(false); setBatchOpenMessage('Tek sekmeli sıraya dönüldü.'); }}>Tek sekmeli moda dön</button>}
-        <button className="queue-done" onClick={markWithdrawn} disabled={!sessionActive || !ready}>İsteği geri çektim</button>
+        <button className="queue-primary" onClick={openNextTen} disabled={!sessionActive || !ready || batchMode}>Sonraki 10 hesabı sekmelerde aç</button>
+        {batchMode && <button className="queue-secondary" onClick={() => { setBatchMode(false); setBatchUsernames([]); localStorage.removeItem(BATCH_QUEUE_KEY); localStorage.removeItem(BATCH_QUEUE_KEY + '-users'); setBatchOpenMessage('Açılan grup iptal edildi; tamamlandı işaretlenmedi.'); }}>Grubu iptal et</button>}
+        {batchMode ? <button className="queue-done" onClick={markBatchWithdrawn} disabled={!sessionActive || !ready || !batchUsernames.length}>{batchUsernames.length} hesabı geri çektim</button> : <button className="queue-done" onClick={markWithdrawn} disabled={!sessionActive || !ready}>İsteği geri çektim</button>}
         <button className="queue-open" onClick={skipCurrent} disabled={!ready}>Bu hesabı atla (istek yok / hata)</button>
       </div>
       {batchOpenMessage && <div className="queue-hint">{batchOpenMessage}</div>}
-      {batchMode && <div className="queue-hint">10 sekmeli mod açık. Sekmelerdeki işlemleri kendin yap; her hesap için buraya dönüp “İsteği geri çektim” ile ayrı ayrı onayla. 10 saniyelik bekleme ve 100 hesapta 5 dakika mola devam eder.</div>}
+      {batchMode && <div className="queue-hint">10 sekmeli mod açık. Açılan gruptaki tüm hesaplarda isteği kendin iptal ettikten sonra grup onay düğmesine bir kez bas. Hepsi ayrı ayrı tamamlandı olarak kaydedilir.</div>}
       {!ready && <div className="queue-wait">Sonraki profil aynı Instagram sekmesinde açılacak: <b>{Math.floor(secondsLeft / 60).toString().padStart(2,'0')}:{(secondsLeft % 60).toString().padStart(2,'0')}</b></div>}
       {!sessionActive && <div className="queue-hint">{resumeAvailable ? 'Önceki oturumun kaydı bulundu. Sürdür düğmesi mevcut sıradaki hesaptan devam eder. ' : ''}Başlat düğmesi Instagram'da tek bir sekme açar. İlgili profilde “Requested” düğmesine kendin basıp isteği iptal et; sonra buraya dönüp onayla.</div>}
       {sessionActive && ready && <div className="queue-hint">Instagram sekmesinde gösterilen isteği iptal ettiğinde buraya dönüp “İsteği geri çektim” düğmesine bas. Bekleme süresi sonunda sıradaki hesap hazır olur. Her 100 onaylı işlemden sonra 5 dakika mola verilir.</div>}
