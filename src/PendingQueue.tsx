@@ -78,6 +78,15 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
     setNextAt(next);
   }
 
+  function skipCurrent() {
+    if (!current || !ready) return;
+    onSkip(current.username);
+    lastAutoOpenedRef.current = '';
+    const next = Date.now() + BETWEEN_ITEMS_SECONDS * 1000;
+    localStorage.setItem(TIMER_KEY, String(next));
+    setNextAt(next);
+  }
+
   function openCurrent() {
     if (!current || !ready || !sessionActive) return;
     const opened = window.open(`https://www.instagram.com/${current.username}/`, 'social-sweep-instagram');
@@ -101,7 +110,7 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
         {!sessionActive ? <button className="queue-primary" onClick={startSession}>{resumeAvailable ? 'Oturumu sürdür ve sıradaki profili aç' : 'Instagram sekmesini aç ve başlat'}</button> : <button className="queue-secondary" onClick={pauseSession}>Oturumu duraklat</button>}
         <button className="queue-open" onClick={openCurrent} disabled={!sessionActive || !ready}>Bu profili yeniden aç</button>
         <button className="queue-done" onClick={markWithdrawn} disabled={!sessionActive || !ready}>İsteği geri çektim</button>
-        <button className="queue-open" onClick={() => { if (current) { onSkip(current.username); lastAutoOpenedRef.current = ''; } }} disabled={!ready}>Bu hesabı atla (istek yok / hata)</button>
+        <button className="queue-open" onClick={skipCurrent} disabled={!ready}>Bu hesabı atla (istek yok / hata)</button>
       </div>
       {!ready && <div className="queue-wait">Sonraki profil aynı Instagram sekmesinde açılacak: <b>{Math.floor(secondsLeft / 60).toString().padStart(2,'0')}:{(secondsLeft % 60).toString().padStart(2,'0')}</b></div>}
       {!sessionActive && <div className="queue-hint">{resumeAvailable ? 'Önceki oturumun kaydı bulundu. Sürdür düğmesi mevcut sıradaki hesaptan devam eder. ' : ''}Başlat düğmesi Instagram'da tek bir sekme açar. İlgili profilde “Requested” düğmesine kendin basıp isteği iptal et; sonra buraya dönüp onayla.</div>}
