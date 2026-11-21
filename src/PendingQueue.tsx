@@ -48,6 +48,7 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
   }, [nextAt, secondsLeft, current, sessionActive]);
 
   function startSession() {
+    if (!ready) return;
     setSessionActive(true);
     setResumeAvailable(false);
     localStorage.setItem(SESSION_KEY, '1');
@@ -107,7 +108,7 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
       <div className="queue-current"><div className="queue-avatar">{current.username.slice(0,1).toUpperCase()}</div><div><small>SIRADAKİ HESAP</small><b>@{current.username}</b><a href={`https://www.instagram.com/${current.username}/`} target="_blank" rel="noreferrer">Profil bağlantısını görüntüle</a></div></div>
       <div className="queue-controls">
         <div className="queue-batch-info"><small>BU GRUPTA İŞLENEN</small><b>{batchCount} / {BATCH_SIZE}</b><small>Her hesap: 10 saniye · 100 hesap sonrası: 5 dakika mola</small></div>
-        {!sessionActive ? <button className="queue-primary" onClick={startSession}>{resumeAvailable ? 'Oturumu sürdür ve sıradaki profili aç' : 'Instagram sekmesini aç ve başlat'}</button> : <button className="queue-secondary" onClick={pauseSession}>Oturumu duraklat</button>}
+        {!sessionActive ? <button className="queue-primary" onClick={startSession} disabled={!ready}>{resumeAvailable ? 'Oturumu sürdür ve sıradaki profili aç' : 'Instagram sekmesini aç ve başlat'}</button> : <button className="queue-secondary" onClick={pauseSession}>Oturumu duraklat</button>}
         <button className="queue-open" onClick={openCurrent} disabled={!sessionActive || !ready}>Bu profili yeniden aç</button>
         <button className="queue-done" onClick={markWithdrawn} disabled={!sessionActive || !ready}>İsteği geri çektim</button>
         <button className="queue-open" onClick={skipCurrent} disabled={!ready}>Bu hesabı atla (istek yok / hata)</button>
