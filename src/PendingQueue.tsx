@@ -9,7 +9,6 @@ const BETWEEN_ITEMS_SECONDS = 60;
 const BATCH_BREAK_SECONDS = 5 * 60;
 
 export default function PendingQueue({ rows, completed, onComplete }: Props) {
-  const [intervalSeconds, setIntervalSeconds] = useState(60);
   const [nextAt, setNextAt] = useState<number>(() => {
     const saved = Number(localStorage.getItem(TIMER_KEY) || 0);
     return Number.isFinite(saved) ? saved : 0;
