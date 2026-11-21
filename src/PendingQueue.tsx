@@ -3,6 +3,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 type Person = { username: string; timestamp?: number; href?: string };
 type Props = { rows: Person[]; completed: string[]; onComplete: (username: string) => void };
 const TIMER_KEY = 'social-sweep-pending-next-at-v1';
+const BATCH_KEY = 'social-sweep-pending-batch-count-v1';
+const BATCH_SIZE = 100;
+const BETWEEN_ITEMS_SECONDS = 60;
+const BATCH_BREAK_SECONDS = 5 * 60;
 
 export default function PendingQueue({ rows, completed, onComplete }: Props) {
   const [intervalSeconds, setIntervalSeconds] = useState(60);
@@ -15,7 +19,8 @@ export default function PendingQueue({ rows, completed, onComplete }: Props) {
   const instagramTabRef = useRef<Window | null>(null);
   const lastAutoOpenedRef = useRef<string>('');
   const completedSet = useMemo(() => new Set(completed), [completed]);
-  const remaining = useMemo(() => rows.filter(row => !completedSet.has(row.username)), [rows, completedSet]);
+  const remaining = useMemo(() => rows.filter(row => !completedSet.has(row.username)).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)), [rows, completedSet]);
+  const [batchCount, setBatchCount] = useState(() => Number(localStorage.getItem(BATCH_KEY) || 0) % BATCH_SIZE);
   const current = remaining[0];
   const secondsLeft = Math.max(0, Math.ceil((nextAt - now) / 1000));
   const ready = secondsLeft === 0;
@@ -54,7 +59,11 @@ export default function PendingQueue({ rows, completed, onComplete }: Props) {
     if (!current || !ready || !sessionActive) return;
     onComplete(current.username);
     lastAutoOpenedRef.current = '';
-    const next = Date.now() + intervalSeconds * 1000;
+    const nextBatchCount = (batchCount + 1) % BATCH_SIZE;
+    setBatchCount(nextBatchCount);
+    localStorage.setItem(BATCH_KEY, String(nextBatchCount));
+    const waitSeconds = nextBatchCount === 0 ? BATCH_BREAK_SECONDS : BETWEEN_ITEMS_SECONDS;
+    const next = Date.now() + waitSeconds * 1000;
     localStorage.setItem(TIMER_KEY, String(next));
     setNextAt(next);
   }
@@ -70,7 +79,7 @@ export default function PendingQueue({ rows, completed, onComplete }: Props) {
 
   return <section className="panel pending-queue">
     <div className="pending-queue-head">
-      <div><span className="eyebrow">KONTROLLÜ İŞLEM SIRASI</span><h3>Bekleyen istekleri sırayla temizle</h3><p>Instagram tek bir sekmede açık kalır. İsteği Instagram'da sen geri çekersin; süre dolunca aynı sekme sıradaki profile geçer.</p></div>
+      <div><span className="eyebrow">KONTROLLÜ İŞLEM SIRASI</span><h3>Bekleyen istekleri sırayla temizle</h3><p>En yeni gönderilmiş istekten eskiye doğru ilerler. Her iptali sen onaylarsın; 1 dakika aralıklarla 100 hesaplık gruplar hâlinde çalışır.</p></div>
       <span className="queue-count">{remaining.length.toLocaleString('tr-TR')} kaldı</span>
     </div>
     <div className="queue-progress"><span style={{width: `${rows.length ? (completed.length / rows.length) * 100 : 0}%`}} /></div>
@@ -78,18 +87,14 @@ export default function PendingQueue({ rows, completed, onComplete }: Props) {
     {current ? <>
       <div className="queue-current"><div className="queue-avatar">{current.username.slice(0,1).toUpperCase()}</div><div><small>SIRADAKİ HESAP</small><b>@{current.username}</b><a href={`https://www.instagram.com/${current.username}/`} target="_blank" rel="noreferrer">Profil bağlantısını görüntüle</a></div></div>
       <div className="queue-controls">
-        <label>İşlemler arasındaki bekleme
-          <select value={intervalSeconds} onChange={event => setIntervalSeconds(Number(event.target.value))} disabled={sessionActive && !ready}>
-            <option value={60}>1 dakika</option><option value={120}>2 dakika</option><option value={300}>5 dakika</option><option value={600}>10 dakika</option>
-          </select>
-        </label>
+        <div className="queue-batch-info"><small>BU GRUPTA İŞLENEN</small><b>{batchCount} / {BATCH_SIZE}</b><small>Her hesap: 1 dakika · 100 hesap sonrası: 5 dakika mola</small></div>
         {!sessionActive ? <button className="queue-primary" onClick={startSession}>Instagram sekmesini aç ve başlat</button> : <button className="queue-secondary" onClick={() => setSessionActive(false)}>Oturumu duraklat</button>}
         <button className="queue-open" onClick={openCurrent} disabled={!sessionActive || !ready}>Bu profili yeniden aç</button>
         <button className="queue-done" onClick={markWithdrawn} disabled={!sessionActive || !ready}>İsteği geri çektim</button>
       </div>
       {!ready && <div className="queue-wait">Sonraki profil aynı Instagram sekmesinde açılacak: <b>{Math.floor(secondsLeft / 60).toString().padStart(2,'0')}:{(secondsLeft % 60).toString().padStart(2,'0')}</b></div>}
       {!sessionActive && <div className="queue-hint">Başlat düğmesi Instagram'da tek bir sekme açar. İlgili profilde “Requested” düğmesine kendin basıp isteği iptal et; sonra buraya dönüp onayla.</div>}
-      {sessionActive && ready && <div className="queue-hint">Instagram sekmesinde gösterilen isteği iptal ettiğinde buraya dönüp “İsteği geri çektim” düğmesine bas. Bekleme süresi sonunda aynı sekme sıradaki hesaba geçer.</div>}
+      {sessionActive && ready && <div className="queue-hint">Instagram sekmesinde gösterilen isteği iptal ettiğinde buraya dönüp “İsteği geri çektim” düğmesine bas. Bekleme süresi sonunda aynı sekme sıradaki hesaba geçer. Her 100 onaylı işlemden sonra 5 dakika mola verilir.</div>}
     </> : <div className="queue-finished">Listedeki tüm bekleyen istekler tamamlandı. 🎉</div>}
     <div className="queue-safety">Instagram'daki iptal düğmesine otomatik basılmaz. Social Sweep yalnızca profil sekmesini sırayla yönlendirir ve senin onayladığın ilerlemeyi kaydeder. Instagram bir uyarı veya kısıtlama gösterirse işlemi durdur.</div>
   </section>;
