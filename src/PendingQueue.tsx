@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 type Person = { username: string; timestamp?: number; href?: string };
-type Props = { rows: Person[]; completed: string[]; skipped: string[]; onComplete: (username: string) => void; onSkip: (username: string) => void; onRestoreSkipped: () => void };
+type Props = { rows: Person[]; completed: string[]; skipped: string[]; onComplete: (username: string) => void; onCompleteMany: (usernames: string[]) => void; onSkip: (username: string) => void; onRestoreSkipped: () => void };
 const TIMER_KEY = 'social-sweep-pending-next-at-v1';
 const BATCH_KEY = 'social-sweep-pending-batch-count-v1';
 const SESSION_KEY = 'social-sweep-pending-session-v1';
@@ -10,7 +10,7 @@ const BATCH_SIZE = 100;
 const BETWEEN_ITEMS_SECONDS = 10;
 const BATCH_BREAK_SECONDS = 5 * 60;
 
-export default function PendingQueue({ rows, completed, skipped, onComplete, onSkip, onRestoreSkipped }: Props) {
+export default function PendingQueue({ rows, completed, skipped, onComplete, onCompleteMany, onSkip, onRestoreSkipped }: Props) {
   const [nextAt, setNextAt] = useState<number>(() => {
     const saved = Number(localStorage.getItem(TIMER_KEY) || 0);
     return Number.isFinite(saved) ? saved : 0;
@@ -104,7 +104,7 @@ export default function PendingQueue({ rows, completed, skipped, onComplete, onS
   function markBatchWithdrawn() {
     if (!batchMode || !batchUsernames.length || !ready || !sessionActive) return;
     const count = batchUsernames.length;
-    batchUsernames.forEach(username => onComplete(username));
+    onCompleteMany(batchUsernames);
     const total = batchCount + count;
     const crossedBreak = total >= BATCH_SIZE;
     const nextBatchCount = total % BATCH_SIZE;
